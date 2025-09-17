@@ -18,7 +18,7 @@ def cpu_train(args, model, train_dataset, TO_TOKEN, tokenizer, device='cpu', che
     lr_scheduler = get_scheduler(
         name="linear",
         optimizer=optimizer,
-        num_warmup_steps=100,
+        num_warmup_steps=300,
         num_training_steps=args.steps,
     )
 
