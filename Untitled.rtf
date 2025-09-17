@@ -1,0 +1,16 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2822
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fnil\fcharset0 Menlo-Regular;}
+{\colortbl;\red255\green255\blue255;\red255\green255\blue255;\red76\green76\blue76;\red0\green0\blue0;
+\red0\green0\blue0;}
+{\*\expandedcolortbl;;\cssrgb\c100000\c100000\c100000;\cssrgb\c36926\c36926\c36926;\cssrgb\c0\c0\c0;
+\csgray\c0\c0;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww16820\viewh12320\viewkind0
+\pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardirnatural\partightenfactor0
+
+\f0\fs36 \cf2 \cb3 \CocoaLigature0 \
+\cf4 \cb5 Train Transformer \cf2 \cb3 \
+python -m ssm_experiments.cli --only transformer --steps 8000 --min-train-len 10 --max-train-len 30 --min-eval-len 5 --max-eval-len 200 --context-len 220 --eval-context-len 450 --eval-batch-size 32 --eval-num-batches 10\
+\
+Train Mamba\
+\pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardirnatural\partightenfactor0
+\cf2 python -m ssm_experiments.cli --only mamba --steps 8000 --min-train-len 10 --max-train-len 30 --min-eval-len 5 --max-eval-len 200 --context-len 220 --eval-context-len 450 --eval-batch-size 32 --eval-num-batches 10}
