@@ -372,6 +372,11 @@ def main():
             continue
 
         print(f"Training {model_name.upper()}...")
+        # Print resolved LR schedule parameters
+        max_lr = getattr(args, 'max_lr', getattr(args, 'lr', 1e-4))
+        min_lr = getattr(args, 'min_lr', 1e-6)
+        warmup_steps = getattr(args, 'warmup_steps', 300)
+        print(f"LR schedule: warmup_steps={warmup_steps}, max_lr={max_lr}, min_lr={min_lr}")
 
         model = get_model(args, tokenizer)
         param_count = count_parameters(model)
