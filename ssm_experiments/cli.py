@@ -487,13 +487,9 @@ def main():
                         os.path.join(figures_dir, 'comparison_overview.png'))
         create_comparison_table(results['transformer_rope'], results['mamba'])
     elif has_t:
-        from .utils.plotting import plot_length_gen_single, plot_comprehensive_summary
-        plot_length_gen_single(results['transformer_rope'], 'Transformer: RoPE',
-                               os.path.join(figures_dir, 'transformer_length_generalization.png'))
-        # Single-model summary (Mamba=None)
-        plot_comprehensive_summary(results['transformer_rope'], None,
-                                   os.path.join(figures_dir, 'transformer_comprehensive_summary.png'))
-        print("Only Transformer run; comparison plot skipped.")
+        # Skip generating standalone Transformer figures to reduce clutter.
+        # Previously generated: transformer_length_generalization.png and transformer_comprehensive_summary.png
+        print("Only Transformer run; skipping standalone Transformer figures.")
     elif has_m:
         from .utils.plotting import plot_length_gen_single, plot_comprehensive_summary
         plot_length_gen_single(results['mamba'], 'GSSM: Mamba',
