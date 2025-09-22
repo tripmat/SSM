@@ -23,7 +23,6 @@
     "transformer_nope": { "heads": 8 },
     "transformer_alibi": { "heads": 8 },
     "transformer_hard_alibi": { "heads": 8, "num_masked_heads": 6, "min_window_divisor": 5 },
-    "mamba": { "state_dim": 48, "dt_min": 0.001, "dt_max": 1.0 },
     "paper_mamba": { "state_dim": 64, "dt_min": 0.001, "dt_max": 0.5 }
   }
 }
