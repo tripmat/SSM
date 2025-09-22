@@ -9,7 +9,7 @@ import torch.nn.functional as F
 
 
 class PaperInformedMambaBlock(nn.Module):
-    def __init__(self, d_model, d_state=32):
+    def __init__(self, d_model, d_state=32, dt_min=1e-3, dt_max=0.2):
         super().__init__()
         self.d_model = d_model
         self.d_state = d_state
@@ -23,8 +23,8 @@ class PaperInformedMambaBlock(nn.Module):
         self.C_proj = nn.Conv1d(d_model, d_model * d_state, kernel_size=1, groups=d_model, bias=True)
         # Per-channel learned timestep (Δt) projection used to discretize the SSM
         self.dt_proj = nn.Linear(d_model, d_model)
-        self.dt_min = 1e-3
-        self.dt_max = 0.2
+        self.dt_min = float(dt_min)
+        self.dt_max = float(dt_max)
 
         self.out_proj = nn.Linear(d_model, d_model)
         self.norm = nn.LayerNorm(d_model)
@@ -98,11 +98,16 @@ class PaperInformedMambaLMHeadModel(nn.Module):
         d_state = 32
         if ssm_cfg and "d_state" in ssm_cfg:
             d_state = ssm_cfg["d_state"]
+        dt_min = (ssm_cfg or {}).get("dt_min", 1e-3)
+        dt_max = (ssm_cfg or {}).get("dt_max", 0.2)
 
         print(f"Using paper-informed Mamba with d_state={d_state}")
 
         self.embedding = nn.Embedding(vocab_size, d_model)
-        self.layers = nn.ModuleList([PaperInformedMambaBlock(d_model, d_state) for _ in range(n_layer)])
+        self.layers = nn.ModuleList([
+            PaperInformedMambaBlock(d_model, d_state, dt_min=dt_min, dt_max=dt_max)
+            for _ in range(n_layer)
+        ])
         self.lm_head = nn.Linear(d_model, vocab_size, bias=False)
         self.apply(self._init_weights)
 
@@ -130,4 +135,3 @@ class PaperInformedMambaLMHeadModel(nn.Module):
 
 # Friendlier alias
 PaperMambaLMHeadModel = PaperInformedMambaLMHeadModel
-

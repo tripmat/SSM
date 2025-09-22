@@ -2,7 +2,6 @@ from transformers import GPTNeoXForCausalLM, GPTNeoXConfig
 from .hard_alibi_model import GPTNeoXHardAlibiForCausalLM
 from .alibi_model import GPTNeoXAlibiForCausalLM
 from .nope import GPTNeoXNoPEForCausalLM
-from .optimized_paper_mamba import MambaForCopying30
 from .paper_mamba import PaperMambaLMHeadModel
 
 
@@ -49,20 +48,28 @@ def get_model(args, tokenizer):
         model = GPTNeoXHardAlibiForCausalLM(config)
 
     elif args.model == "mamba":
-        # Alias to optimized paper-informed implementation to avoid real mamba_ssm dependency
-        model = MambaForCopying30(
+        # Alias to paper-informed implementation (no optimized variant)
+        model = PaperMambaLMHeadModel(
             d_model=args.hidden_size,
             n_layer=args.layers,
-            d_state=getattr(args, "state_dim", 16),
+            ssm_cfg={
+                "d_state": getattr(args, "state_dim", 16),
+                "dt_min": getattr(args, "dt_min", 1e-3),
+                "dt_max": getattr(args, "dt_max", 0.2),
+            },
             vocab_size=len(tokenizer),
         )
-        print("Using OPTIMIZED paper-informed Mamba (alias for 'mamba')")
+        print("Using paper-informed Mamba (alias for 'mamba')")
 
     elif args.model == "paper_mamba":
         model = PaperMambaLMHeadModel(
             d_model=args.hidden_size,
             n_layer=args.layers,
-            ssm_cfg={"d_state": getattr(args, "state_dim", 16)},
+            ssm_cfg={
+                "d_state": getattr(args, "state_dim", 16),
+                "dt_min": getattr(args, "dt_min", 1e-3),
+                "dt_max": getattr(args, "dt_max", 0.2),
+            },
             vocab_size=len(tokenizer),
         )
         print("Using paper-informed Mamba (CPU-friendly implementation)")

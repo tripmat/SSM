@@ -280,7 +280,7 @@ def main():
         for name, overrides in user_models.items():
             if name not in configs or not isinstance(overrides, dict):
                 continue
-            for key in ('model', 'hidden_size', 'layers', 'heads', 'state_dim', 'num_masked_heads', 'min_window_size', 'min_window_divisor', 'dropout_rate'):
+            for key in ('model', 'hidden_size', 'layers', 'heads', 'state_dim', 'dt_min', 'dt_max', 'num_masked_heads', 'min_window_size', 'min_window_divisor', 'dropout_rate'):
                 if key in overrides:
                     configs[name][key] = overrides[key]
     # Optional filtering to run specific models
@@ -334,6 +334,10 @@ def main():
             args.state_dim = config['state_dim']
         if 'num_masked_heads' in config:
             args.num_masked_heads = config['num_masked_heads']
+        if 'dt_min' in config:
+            args.dt_min = config['dt_min']
+        if 'dt_max' in config:
+            args.dt_max = config['dt_max']
         # Prefer divisor if provided; else support explicit size or 'auto'
         if 'min_window_divisor' in config:
             try:
