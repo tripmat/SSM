@@ -1,0 +1,27 @@
+{
+  "global": {
+    "target_params": 10000000,
+    "steps": 20000,
+    "lr": 0.00005,
+    "train_batch_size": 4,
+    "eval_batch_size": 4,
+    "eval_num_batches": 3,
+    "min_train_len": 5,
+    "max_train_len": 20,
+    "min_eval_len": 10,
+    "max_eval_len": 101,
+    "context_len": 220,
+    "eval_context_len": 450,
+    "vocab_size": 26,
+    "n_gram": 0,
+    "length_answer": 0
+  },
+  "models": {
+    "transformer_rope": { "heads": 8 },
+    "transformer_nope": { "heads": 8 },
+    "transformer_alibi": { "heads": 8 },
+    "transformer_hard_alibi": { "heads": 8, "num_masked_heads": 6, "min_window_divisor": 5 },
+    "mamba": { "state_dim": 48 },
+    "paper_mamba": { "state_dim": 48 }
+  }
+}

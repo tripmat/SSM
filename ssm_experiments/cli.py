@@ -6,18 +6,22 @@ import io
 from datetime import datetime
 import atexit
 import random
+import shutil
 import numpy as np
 import torch
 
 from .models.registry import get_model
 from .data import get_tokenizer, get_train_dataset, CopyDataset
-from .train import cpu_train
+from .train import train_model
 from .evaluate import offline_accuracy_evaluation, evaluate_length_generalization, generate_fixed_eval_dataset
 from .utils.parameter_matching import get_optimal_configs, count_parameters
-from .utils.plotting import plot_paper_reproduction, create_comparison_table
+from .utils.plotting import plot_paper_reproduction, create_comparison_table, plot_all_models_comparison
 
 
 def main():
+    # Set CUBLAS configuration for deterministic GPU training
+    os.environ.setdefault('CUBLAS_WORKSPACE_CONFIG', ':4096:8')
+
     parser = argparse.ArgumentParser(description="Transformer vs Mamba (slim) on synthetic copy task")
     parser.add_argument('--steps', type=int, default=2000, help='Training steps')
     parser.add_argument('--lr', type=float, default=1.25e-4, help='Learning rate')
@@ -31,9 +35,32 @@ def main():
     parser.add_argument('--context-len', type=int, default=220)
     parser.add_argument('--eval-context-len', type=int, default=450)
     parser.add_argument('--outputs', type=str, default='outputs', help='Outputs root directory')
-    parser.add_argument('--only', type=str, choices=['both', 'transformer', 'mamba'], default='both',
+    parser.add_argument('--config', type=str, default=None,
+                        help='Path to JSON config file to override global and per-model parameters')
+    parser.add_argument('--only', type=str,
+                        choices=['all', 'transformer', 'mamba', 'paper_mamba', 'transformer_rope', 'transformer_nope',
+                                'transformer_alibi', 'transformer_hard_alibi'],
+                        default='all',
                         help='Select which model(s) to run')
+    parser.add_argument('--device', type=str, default='auto', choices=['auto', 'cpu', 'cuda'],
+                        help='Device to use for training (auto=detect GPU, default: auto)')
     args_cli = parser.parse_args()
+
+    # Device selection
+    if args_cli.device == 'auto':
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    else:
+        device = args_cli.device
+
+    # Validate device availability
+    if device == 'cuda' and not torch.cuda.is_available():
+        print("Warning: CUDA requested but not available. Falling back to CPU.")
+        device = 'cpu'
+
+    print(f"Using device: {device}")
+    if device == 'cuda':
+        print(f"GPU: {torch.cuda.get_device_name(0)}")
+        print(f"CUDA version: {torch.version.cuda}")
 
     # Reproducibility: seed all relevant RNGs; allow override via env var
     seed = int(os.environ.get('SSM_SEED', '1337'))
@@ -41,6 +68,9 @@ def main():
         random.seed(seed)
         np.random.seed(seed)
         torch.manual_seed(seed)
+        if device == 'cuda':
+            torch.cuda.manual_seed(seed)
+            torch.cuda.manual_seed_all(seed)
         try:
             torch.use_deterministic_algorithms(True)
         except Exception:
@@ -83,6 +113,58 @@ def main():
         except Exception:
             pass
 
+    def check_existing_results(model_name, args, checkpoints_dir):
+        """Check if a model has already been trained to completion"""
+        config_str = f"{model_name}_{args.hidden_size}h_{args.layers}l_{args.lr}lr_{args.steps}s"
+        results_path = os.path.join(checkpoints_dir, f"{config_str}_results.json")
+
+        if os.path.exists(results_path):
+            try:
+                with open(results_path, 'r') as f:
+                    results = json.load(f)
+                # Check if results are complete
+                if ('training' in results and 'fixed_accuracy' in results and
+                    'length_gen' in results and len(results['training']['losses']) >= args.steps):
+                    print(f"Found complete results for {model_name}, skipping training")
+                    return results
+            except Exception as e:
+                print(f"Warning: Failed to load existing results for {model_name}: {e}")
+
+        return None
+
+    def validate_context_lengths(train_ctx, max_train_len, eval_ctx, max_eval_len):
+        """Validate sequence lengths once with clear guidance.
+
+        Requirements:
+        - Training: context_len must be > 2 * max_train_len
+        - Fixed-eval set (used for accuracy snapshots): eval_context_len must be > 2 * max_train_len
+        - Length generalization: eval lengths beyond eval_context_len are skipped (FYI)
+        """
+        train_req = 2 * max_train_len
+        eval_req_for_fixed = 2 * max_train_len
+
+        problems = []
+        if train_ctx <= train_req:
+            problems.append(
+                f"Training context_len={train_ctx} is too small for max_train_len={max_train_len} (needs > {train_req})."
+            )
+        if eval_ctx <= eval_req_for_fixed:
+            problems.append(
+                f"Eval context_len={eval_ctx} is too small to build the fixed eval set at length {max_train_len} (needs > {eval_req_for_fixed})."
+            )
+
+        if problems:
+            print("\nConfiguration error: context lengths are insufficient for chosen string lengths.\n")
+            for p in problems:
+                print(f" - {p}")
+            print(
+                "\nRecommendations:\n"
+                f" - Set --context-len to a value > {train_req} (e.g., {train_req + 20}).\n"
+                f" - Set --eval-context-len to a value > {eval_req_for_fixed} (e.g., {eval_req_for_fixed + 50}).\n"
+                " - Or reduce --max-train-len / --max-eval-len accordingly.\n"
+            )
+            raise SystemExit(2)
+
     class Args:
         def __init__(self):
             self.train_task = "copy"
@@ -111,26 +193,138 @@ def main():
             self.context_len = args_cli.context_len
             self.eval_context_len = args_cli.eval_context_len
 
+    # Optional: load user config (JSON) to override globals and per-model params
+    user_config = None
+    if args_cli.config:
+        cfg_path = os.path.abspath(args_cli.config)
+        if not os.path.exists(cfg_path):
+            raise SystemExit(f"Config file not found: {cfg_path}")
+        try:
+            with open(cfg_path, 'r') as f:
+                user_config = json.load(f)
+            print(f"Loaded config: {cfg_path}")
+            # Save an exact copy of the provided config into the logs folder for reproducibility
+            try:
+                dest_name = f"run_{ts}.config.json"
+                dest_path = os.path.join(logs_dir, dest_name)
+                # Avoid copying over itself
+                if os.path.abspath(cfg_path) != os.path.abspath(dest_path):
+                    shutil.copy2(cfg_path, dest_path)
+                    print(f"Saved config snapshot to: {dest_path}")
+            except Exception as e:
+                print(f"Warning: failed to snapshot config file: {e}")
+        except Exception as e:
+            raise SystemExit(f"Failed to load config {cfg_path}: {e}")
+
+    def apply_global_overrides(argobj):
+        if not user_config:
+            return argobj
+        global_cfg = user_config.get('global') or user_config.get('globals')
+        if not isinstance(global_cfg, dict):
+            return argobj
+        # Only override known keys to avoid typos silently passing
+        allowed = {
+            'steps', 'lr', 'train_batch_size', 'eval_batch_size', 'eval_num_batches',
+            'min_train_len', 'max_train_len', 'min_eval_len', 'max_eval_len',
+            'context_len', 'eval_context_len', 'vocab_size', 'n_gram', 'length_answer'
+        }
+        for k, v in global_cfg.items():
+            if k in allowed:
+                setattr(argobj, k, v)
+        return argobj
+
     results = {}
-    configs = get_optimal_configs()
-    # Optional filtering to run a single model
+    # If user provided target params and/or constraints, pass them through to matching
+    target_params = None
+    transformer_heads = None
+    mamba_state_dim = None
+    hard_num_masked_heads = None
+    if user_config:
+        g = user_config.get('global') or user_config.get('globals') or {}
+        target_params = g.get('target_params')
+        # Transformer heads: use any provided transformer variant heads (rope preferred)
+        mcfg = user_config.get('models') or {}
+        tr = (mcfg.get('transformer_rope') or mcfg.get('transformer') or {})
+        if isinstance(tr, dict) and 'heads' in tr:
+            transformer_heads = tr['heads']
+        tha = mcfg.get('transformer_hard_alibi') or {}
+        if isinstance(tha, dict) and 'num_masked_heads' in tha:
+            hard_num_masked_heads = tha['num_masked_heads']
+        pm = mcfg.get('paper_mamba') or {}
+        m = mcfg.get('mamba') or {}
+        # Prefer explicit paper_mamba state_dim, else mamba
+        if isinstance(pm, dict) and 'state_dim' in pm:
+            mamba_state_dim = pm['state_dim']
+        elif isinstance(m, dict) and 'state_dim' in m:
+            mamba_state_dim = m['state_dim']
+
+    # Determine vocab_size for matching (prefer config override if any)
+    vocab_for_matching = None
+    if user_config:
+        g = user_config.get('global') or user_config.get('globals') or {}
+        if isinstance(g, dict) and 'vocab_size' in g:
+            vocab_for_matching = g['vocab_size']
+    if vocab_for_matching is None:
+        vocab_for_matching = getattr(Args(), 'vocab_size', 26)
+
+    configs = get_optimal_configs(
+        target_params=target_params or 10_000_000,
+        vocab_size=vocab_for_matching,
+        transformer_heads=transformer_heads,
+        mamba_state_dim=mamba_state_dim,
+        hard_num_masked_heads=hard_num_masked_heads or 6,
+    )
+    # Apply per-model overrides from config if provided
+    if user_config and isinstance(user_config.get('models'), dict):
+        user_models = user_config['models']
+        for name, overrides in user_models.items():
+            if name not in configs or not isinstance(overrides, dict):
+                continue
+            for key in ('model', 'hidden_size', 'layers', 'heads', 'state_dim', 'num_masked_heads', 'min_window_size', 'min_window_divisor', 'dropout_rate'):
+                if key in overrides:
+                    configs[name][key] = overrides[key]
+    # Optional filtering to run specific models
     if args_cli.only == 'transformer':
-        configs = {k: v for k, v in configs.items() if k == 'transformer_rope'}
+        configs = {k: v for k, v in configs.items() if k.startswith('transformer')}
     elif args_cli.only == 'mamba':
         configs = {k: v for k, v in configs.items() if k == 'mamba'}
+    elif args_cli.only == 'all':
+        # Exclude the optimized 'mamba' when running "all"; keep paper_mamba + transformers
+        if 'mamba' in configs:
+            configs.pop('mamba')
+            print("Note: excluding 'mamba' from 'all'. Use --only mamba to run it.")
+    else:
+        # Run specific model only
+        configs = {k: v for k, v in configs.items() if k == args_cli.only}
 
     args_temp = Args()
+    args_temp = apply_global_overrides(args_temp)
+    # One-time validation for context vs lengths before any data/model work
+    validate_context_lengths(
+        train_ctx=args_temp.context_len,
+        max_train_len=args_temp.max_train_len,
+        eval_ctx=args_temp.eval_context_len,
+        max_eval_len=args_temp.max_eval_len,
+    )
     tokenizer, TO_TOKEN, TO_CHAR = get_tokenizer(args_temp)
     fixed_eval_dataset = generate_fixed_eval_dataset(args_temp, tokenizer, TO_TOKEN, num_examples=100)
 
     print("Starting experiments...")
     print("=" * 60)
 
+    # Outputs layout
+    outputs_dir = os.path.abspath(args_cli.outputs)
+    checkpoints_dir = os.path.join(outputs_dir, 'checkpoints')
+    figures_dir = os.path.join(outputs_dir, 'figures')
+    os.makedirs(checkpoints_dir, exist_ok=True)
+    os.makedirs(figures_dir, exist_ok=True)
+
     for model_name, config in configs.items():
-        print(f"\nTraining {model_name.upper()}...")
+        print(f"\nProcessing {model_name.upper()}...")
         print("-" * 40)
 
         args = Args()
+        args = apply_global_overrides(args)
         args.model = config['model']
         args.hidden_size = config['hidden_size']
         args.layers = config['layers']
@@ -138,16 +332,45 @@ def main():
             args.heads = config['heads']
         if 'state_dim' in config:
             args.state_dim = config['state_dim']
+        if 'num_masked_heads' in config:
+            args.num_masked_heads = config['num_masked_heads']
+        # Prefer divisor if provided; else support explicit size or 'auto'
+        if 'min_window_divisor' in config:
+            try:
+                div = int(config['min_window_divisor'])
+                if div <= 0:
+                    raise ValueError('divisor must be > 0')
+                args.min_window_size = max(1, int(args.max_train_len) // div)
+                print(f"Resolved min_window_size via divisor {div} -> {args.min_window_size} (max_train_len={args.max_train_len})")
+            except Exception as e:
+                print(f"Warning: invalid min_window_divisor={config.get('min_window_divisor')}: {e}; using default rule //5")
+                args.min_window_size = max(1, int(args.max_train_len) // 5)
+        elif 'min_window_size' in config:
+            val = config['min_window_size']
+            if isinstance(val, str) and val.lower() == 'auto':
+                args.min_window_size = max(1, int(args.max_train_len) // 5)
+                print(f"Resolved min_window_size=auto -> {args.min_window_size} (from max_train_len={args.max_train_len})")
+            else:
+                try:
+                    args.min_window_size = int(val)
+                except Exception:
+                    print(f"Warning: invalid min_window_size={val}; falling back to default 100")
+                    args.min_window_size = 100
+        if 'dropout_rate' in config:
+            args.dropout_rate = config['dropout_rate']
+
+        # Check if model was already trained to completion
+        existing_results = check_existing_results(model_name, args, checkpoints_dir)
+        if existing_results is not None:
+            results[model_name] = existing_results
+            print(f"Using existing results for {model_name}")
+            continue
+
+        print(f"Training {model_name.upper()}...")
 
         model = get_model(args, tokenizer)
         param_count = count_parameters(model)
         print(f"Model parameters: {param_count:,}")
-
-        # Outputs layout
-        checkpoints_dir = os.path.join(outputs_dir, 'checkpoints')
-        figures_dir = os.path.join(outputs_dir, 'figures')
-        os.makedirs(checkpoints_dir, exist_ok=True)
-        os.makedirs(figures_dir, exist_ok=True)
 
         # Train dataset
         train_dataset = CopyDataset(
@@ -164,13 +387,13 @@ def main():
         )
 
         # Train
-        training_results = cpu_train(
+        training_results = train_model(
             args,
             model,
             train_dataset,
             TO_TOKEN,
             tokenizer,
-            device='cpu',
+            device=device,
             checkpoint_dir=checkpoints_dir,
             model_name=model_name,
             fixed_eval_dataset=fixed_eval_dataset,
@@ -182,7 +405,6 @@ def main():
         results_path = os.path.join(checkpoints_dir, f"{config_str}_results.json")
 
         try:
-            import torch
             torch.save(model.state_dict(), checkpoint_path)
             print(f"Saved final checkpoint: {checkpoint_path}")
         except Exception as e:
@@ -205,8 +427,8 @@ def main():
             eval_model = model
 
         # Evaluate using reloaded model
-        fixed_accuracy = offline_accuracy_evaluation(eval_model, fixed_eval_dataset, args, tokenizer, TO_TOKEN)
-        length_gen_results = evaluate_length_generalization(args, eval_model, tokenizer, TO_TOKEN)
+        fixed_accuracy = offline_accuracy_evaluation(eval_model, fixed_eval_dataset, args, tokenizer, TO_TOKEN, device=device)
+        length_gen_results = evaluate_length_generalization(args, eval_model, tokenizer, TO_TOKEN, device=device)
 
         results_obj = {
             'training': training_results,
@@ -238,6 +460,11 @@ def main():
 
     # Plots and summary
     print(f"\nGenerating plots in {figures_dir}...")
+
+    # Generate comprehensive comparison of all models
+    plot_all_models_comparison(results, os.path.join(figures_dir, 'all_models_comparison.png'))
+
+    # Generate traditional plots for backward compatibility
     has_t = 'transformer_rope' in results
     has_m = 'mamba' in results
     if has_t and has_m:

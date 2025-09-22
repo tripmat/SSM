@@ -7,11 +7,22 @@ from torch.nn import CrossEntropyLoss
 from torch.optim import AdamW
 
 
-def cpu_train(args, model, train_dataset, TO_TOKEN, tokenizer, device='cpu', checkpoint_dir=None, model_name=None, fixed_eval_dataset=None):
+def train_model(args, model, train_dataset, TO_TOKEN, tokenizer, device=None, checkpoint_dir=None, model_name=None, fixed_eval_dataset=None):
+    # Auto-detect device if not specified
+    if device is None:
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
     print(f"Training on device: {device}")
     print("Masking answer region in inputs during training to prevent leakage.")
 
     model = model.to(device)
+    # Diagnostics: confirm device placement
+    try:
+        print(f"Model device: {next(model.parameters()).device}")
+        print(f"CUDA available: {torch.cuda.is_available()}")
+    except StopIteration:
+        # Model with no parameters
+        print("Model has no parameters to inspect for device.")
     optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=0.1)
 
     from transformers import get_scheduler
@@ -41,12 +52,41 @@ def cpu_train(args, model, train_dataset, TO_TOKEN, tokenizer, device='cpu', che
         "{desc}: {n_fmt}/{total_fmt} | {rate_fmt} | "
         "{postfix} | Elapsed={elapsed} | ETA={remaining}"
     )
+    # Friendly label for the training progress bar
+    pretty_name = None
+    if model_name:
+        if model_name.startswith('transformer_'):
+            suffix = model_name.split('transformer_', 1)[1]
+            mapping = {
+                'rope': 'Rope',
+                'nope': 'NoPE',
+                'alibi': 'ALiBi',
+                'hard_alibi': 'Hard-ALiBi',
+            }
+            pretty_name = mapping.get(suffix, suffix.title())
+        elif model_name in ('mamba', 'paper_mamba'):
+            pretty_name = 'Mamba'
+        else:
+            pretty_name = model_name.title()
+    else:
+        pretty_name = getattr(args, 'model', 'Model')
+
+    # Route tqdm output to real TTY only (avoid spamming log file via Tee)
+    tqdm_stream = getattr(sys, '__stderr__', None) or sys.stderr
+    try:
+        is_tty = bool(tqdm_stream.isatty())
+    except Exception:
+        is_tty = False
+
     progress_bar = tqdm(
         range(num_training_steps),
-        desc='Training',
+        desc=f'Training {pretty_name}',
         dynamic_ncols=True,
         bar_format=bar_format,
-        mininterval=0.5,
+        mininterval=1.0,
+        leave=False,
+        file=tqdm_stream,
+        disable=not is_tty,
     )
     start_time = time.time()
 
@@ -74,13 +114,13 @@ def cpu_train(args, model, train_dataset, TO_TOKEN, tokenizer, device='cpu', che
 
         optimizer.zero_grad()
 
-        if args.model == "lstm":
-            state = model.init_hidden(x_masked.size(0), device)
-            logits, _ = model(x_masked, state)
-        elif args.model == "mamba":
-            logits = model(x_masked)[0]
+        out = model(x_masked)
+        if isinstance(out, dict):
+            logits = out.get('logits', out)
+        elif isinstance(out, (list, tuple)):
+            logits = out[0]
         else:
-            logits = model(x_masked)['logits']
+            logits = out
 
         if torch.isnan(logits).any() or torch.isinf(logits).any():
             print(f"Warning: NaN/Inf in logits at step {step}")
@@ -131,7 +171,7 @@ def cpu_train(args, model, train_dataset, TO_TOKEN, tokenizer, device='cpu', che
             try:
                 from .evaluate import offline_accuracy_evaluation
                 with torch.no_grad():
-                    accuracy = offline_accuracy_evaluation(model, fixed_eval_dataset, args, tokenizer, TO_TOKEN, device)
+                    accuracy = offline_accuracy_evaluation(model, fixed_eval_dataset, args, tokenizer, TO_TOKEN, device=device)
                     accuracies.append(accuracy)
                     accuracy_training_examples.append(step * args.train_batch_size)
                     print(f"Step {step + 1}: Accuracy = {accuracy:.1f}%")
@@ -142,9 +182,10 @@ def cpu_train(args, model, train_dataset, TO_TOKEN, tokenizer, device='cpu', che
             finally:
                 model.train(current_training_state)
 
-        progress_bar.set_postfix_str(
-            f"Loss={loss.item():.4f} | Examples={step * args.train_batch_size}", refresh=False
-        )
+        if is_tty:
+            progress_bar.set_postfix_str(
+                f"Loss={loss.item():.4f} | Examples={step * args.train_batch_size}", refresh=False
+            )
 
     elapsed_time = time.time() - start_time
     print(f"Training completed in {elapsed_time:.2f} seconds")
@@ -156,3 +197,7 @@ def cpu_train(args, model, train_dataset, TO_TOKEN, tokenizer, device='cpu', che
         'accuracies': accuracies,
         'accuracy_training_examples': accuracy_training_examples,
     }
+
+
+# Backward compatibility alias
+cpu_train = train_model
