@@ -31,13 +31,13 @@ Example:
   - `evaluate.py` – accuracy and length-generalization evaluation
   - `data/` – tokenizer and synthetic datasets
   - `models/` – model registry and minimal implementations
-    - `lstm.py` – simple LSTM baseline (optional)
     - `paper_mamba.py` – CPU-friendly, paper-informed Mamba approximation
   - `utils/` – plotting and parameter matching
 - `outputs/` – generated artifacts (gitignored)
 
 ## Notes
-- Real Mamba: If `mamba_ssm` is installed, it is used automatically. Otherwise a CPU-friendly paper-informed approximation is used.
+- Mamba path: This repo uses a paper-informed Mamba implementation (no external `mamba_ssm` dependency). The `mamba` option aliases to the same implementation as `paper_mamba` for consistency and Windows compatibility.
+- Mamba configuration via JSON: you can override per-model parameters in `--config` (see `configs/experiment.example.json`). For Mamba variants, you can set `state_dim`, `dt_min`, and `dt_max`.
 - Reproducibility: Configs and parameter counts are saved with results.
 - This slim package intentionally omits unused legacy files and large artifacts. The original exploratory files remain in the repo root but are not needed to run via `ssm_experiments`.
 
