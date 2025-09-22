@@ -224,7 +224,8 @@ def main():
             return argobj
         # Only override known keys to avoid typos silently passing
         allowed = {
-            'steps', 'lr', 'train_batch_size', 'eval_batch_size', 'eval_num_batches',
+            'steps', 'lr', 'max_lr', 'min_lr', 'warmup_steps', 'scheduler',
+            'train_batch_size', 'eval_batch_size', 'eval_num_batches',
             'min_train_len', 'max_train_len', 'min_eval_len', 'max_eval_len',
             'context_len', 'eval_context_len', 'vocab_size', 'n_gram', 'length_answer'
         }

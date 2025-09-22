@@ -1,5 +1,6 @@
 import os
 import time
+import math
 import sys
 from tqdm import tqdm
 import torch
@@ -23,15 +24,29 @@ def train_model(args, model, train_dataset, TO_TOKEN, tokenizer, device=None, ch
     except StopIteration:
         # Model with no parameters
         print("Model has no parameters to inspect for device.")
-    optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=0.1)
+    # Optimizer uses peak LR; scheduler scales it per step
+    max_lr = float(getattr(args, 'max_lr', getattr(args, 'lr', 1e-4)))
+    min_lr = float(getattr(args, 'min_lr', 1e-6))
+    warmup_steps = int(getattr(args, 'warmup_steps', 300))
+    optimizer = AdamW(model.parameters(), lr=max_lr, weight_decay=0.1)
 
-    from transformers import get_scheduler
-    lr_scheduler = get_scheduler(
-        name="linear",
-        optimizer=optimizer,
-        num_warmup_steps=300,
-        num_training_steps=args.steps,
-    )
+    # Cosine schedule with warmup: 0 -> max_lr (warmup) -> min_lr (cosine decay)
+    total_steps = int(args.steps)
+    min_ratio = min_lr / max_lr if max_lr > 0 else 0.0
+
+    def lr_lambda(step: int) -> float:
+        if step < warmup_steps:
+            # Linear warmup from 0 to 1
+            return float(step) / max(1, warmup_steps)
+        if step >= total_steps:
+            return min_ratio
+        # Cosine decay from 1 to min_ratio
+        progress = float(step - warmup_steps) / max(1, total_steps - warmup_steps)
+        cos_decay = 0.5 * (1.0 + math.cos(math.pi * progress))  # 1 -> 0
+        return min_ratio + (1.0 - min_ratio) * cos_decay
+
+    from torch.optim.lr_scheduler import LambdaLR
+    lr_scheduler = LambdaLR(optimizer, lr_lambda)
 
     num_training_steps = args.steps
     model.train()
