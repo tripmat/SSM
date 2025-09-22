@@ -18,8 +18,9 @@ class PaperInformedMambaBlock(nn.Module):
         self.conv1d = nn.Conv1d(d_model, d_model, kernel_size=4, padding=2, groups=d_model)
 
         self.A_log = nn.Parameter(torch.randn(d_model, d_state))
-        self.B_proj = nn.Linear(d_model, d_state)
-        self.C_proj = nn.Linear(d_model, d_state)
+        # Depthwise 1x1 convs for per-channel B and C (parameter-efficient)
+        self.B_proj = nn.Conv1d(d_model, d_model * d_state, kernel_size=1, groups=d_model, bias=True)
+        self.C_proj = nn.Conv1d(d_model, d_model * d_state, kernel_size=1, groups=d_model, bias=True)
         # Per-channel learned timestep (Δt) projection used to discretize the SSM
         self.dt_proj = nn.Linear(d_model, d_model)
         self.dt_min = 1e-3
@@ -32,8 +33,10 @@ class PaperInformedMambaBlock(nn.Module):
 
     def _init_weights(self):
         nn.init.normal_(self.A_log, mean=-2.0, std=0.1)
-        nn.init.normal_(self.B_proj.weight, mean=0.0, std=0.02)
-        nn.init.normal_(self.C_proj.weight, mean=0.0, std=0.02)
+        if hasattr(self.B_proj, 'weight'):
+            nn.init.normal_(self.B_proj.weight, mean=0.0, std=0.02)
+        if hasattr(self.C_proj, 'weight'):
+            nn.init.normal_(self.C_proj.weight, mean=0.0, std=0.02)
         nn.init.normal_(self.dt_proj.weight, mean=0.0, std=0.02)
         nn.init.normal_(self.out_proj.weight, mean=0.0, std=0.02)
 
@@ -50,8 +53,14 @@ class PaperInformedMambaBlock(nn.Module):
         A_log_clipped = torch.clamp(self.A_log.float(), min=-5.0, max=2.0)
         # Continuous-time negative rates (stable)
         A = -torch.exp(A_log_clipped)
-        B = self.B_proj(x)
-        C = self.C_proj(x)
+
+        # Compute per-channel B and C efficiently via depthwise 1x1 convs
+        xt = x.transpose(1, 2)  # (B, D, L)
+        B_all = self.B_proj(xt)  # (B, D*d_state, L)
+        C_all = self.C_proj(xt)  # (B, D*d_state, L)
+        B = B_all.transpose(1, 2).reshape(batch_size, L, D, self.d_state)
+        C = C_all.transpose(1, 2).reshape(batch_size, L, D, self.d_state)
+
         # Learn per-token, per-channel timestep and discretize
         dt = F.softplus(self.dt_proj(x))
         dt = torch.clamp(dt, min=self.dt_min, max=self.dt_max)  # (B, L, D)
@@ -63,10 +72,12 @@ class PaperInformedMambaBlock(nn.Module):
             dt_i = dt[:, i]  # (B, D)
             # Discretize dynamics: A_bar = exp(dt * A), B_bar = dt * B
             A_bar = torch.exp(dt_i.unsqueeze(-1) * A.unsqueeze(0))        # (B, D, d_state)
-            B_bar = dt_i.unsqueeze(-1) * B[:, i].unsqueeze(1)             # (B, D, d_state)
-            state_update = states * A_bar + B_bar * x[:, i].unsqueeze(-1)  # (B, D, d_state)
+            B_i = B[:, i]                                                # (B, D, d_state)
+            C_i = C[:, i]                                                # (B, D, d_state)
+            B_bar = dt_i.unsqueeze(-1) * B_i                              # (B, D, d_state)
+            state_update = states * A_bar + B_bar * x[:, i].unsqueeze(-1) # (B, D, d_state)
             states = torch.clamp(state_update, min=-10.0, max=10.0)
-            y = torch.sum(C[:, i].unsqueeze(1) * states, dim=-1)
+            y = torch.sum(C_i * states, dim=-1)
             outputs.append(y)
 
         scan_output = torch.stack(outputs, dim=1)
@@ -119,3 +130,4 @@ class PaperInformedMambaLMHeadModel(nn.Module):
 
 # Friendlier alias
 PaperMambaLMHeadModel = PaperInformedMambaLMHeadModel
+
