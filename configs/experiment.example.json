@@ -2,7 +2,9 @@
   "global": {
     "target_params": 10000000,
     "steps": 20000,
-    "lr": 0.0005,
+    "max_lr": 0.0001,
+    "min_lr": 0.000001,
+    "warmup_steps": 300,
     "train_batch_size": 4,
     "eval_batch_size": 4,
     "eval_num_batches": 3,
@@ -22,6 +24,6 @@
     "transformer_alibi": { "heads": 8 },
     "transformer_hard_alibi": { "heads": 8, "num_masked_heads": 6, "min_window_divisor": 5 },
     "mamba": { "state_dim": 48, "dt_min": 0.001, "dt_max": 1.0 },
-    "paper_mamba": { "state_dim": 48, "dt_min": 0.001, "dt_max": 1.0 }
+    "paper_mamba": { "state_dim": 64, "dt_min": 0.001, "dt_max": 0.5 }
   }
 }
