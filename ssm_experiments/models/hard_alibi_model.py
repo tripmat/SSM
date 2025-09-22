@@ -88,12 +88,8 @@ class GPTHardAlibiAttention(nn.Module):
                 "The hidden size is not divisble by the number of attention heads! Make sure to update them"
             )
         self.head_size = self.hidden_size // self.num_attention_heads
-        # Ensure rotary_ndims is even to match cos/sin construction (which doubles half-dim)
-        self.rotary_ndims = int(self.head_size * getattr(config, 'rotary_pct', 0.0))
-        if self.rotary_ndims % 2 == 1:
-            self.rotary_ndims -= 1
-        if self.rotary_ndims > 0:
-            self.rotary_emb = RotaryEmbedding(self.rotary_ndims, max_position_embeddings=config.max_position_embeddings)
+        # Disable RoPE for Hard-ALiBi to mirror reference implementation
+        self.rotary_ndims = 0
         self._init_bias(config.max_position_embeddings)
 
         self.register_buffer("masked_bias", torch.tensor(-1e9), persistent=False)
@@ -143,19 +139,7 @@ class GPTHardAlibiAttention(nn.Module):
         key = qkv[..., self.head_size : 2 * self.head_size].permute(0, 2, 1, 3)
         value = qkv[..., 2 * self.head_size :].permute(0, 2, 1, 3)
 
-        # Optional rotary embeddings on a subset of dims
-        if self.rotary_ndims > 0:
-            seq_len = key.shape[-2]
-            if has_layer_past:
-                seq_len += layer_past[0].shape[-2]
-            cos, sin = self.rotary_emb(value, seq_len=seq_len)
-            query_rot = query[..., : self.rotary_ndims]
-            query_pass = query[..., self.rotary_ndims :]
-            key_rot = key[..., : self.rotary_ndims]
-            key_pass = key[..., self.rotary_ndims :]
-            query_rot, key_rot = apply_rotary_pos_emb(query_rot, key_rot, cos, sin, position_ids)
-            query = torch.cat((query_rot, query_pass), dim=-1)
-            key = torch.cat((key_rot, key_pass), dim=-1)
+        # RoPE is not applied in Hard-ALiBi
 
         # Cache QKV values
         if has_layer_past:
@@ -242,29 +226,21 @@ class GPTHardAlibiAttention(nn.Module):
             # Apply the attention mask
             attn_scores = attn_scores + attention_mask
         
-        # Vectorized Hard-ALiBi with sensible windows and position awareness
+        # Hard-ALiBi: per-head diagonal-lag masking (reference implementation)
         M = self.num_masked_heads
         if M > 0:
-            H = num_attention_heads
-            Q = query_length
-            K = key_length
-            # Actual positions for queries/keys
-            if position_ids is not None:
-                q_pos = position_ids.view(batch_size, 1, Q, 1).expand(-1, H, -1, -1)
-            else:
-                start = K - Q
-                q_pos = torch.arange(start, start + Q, device=attn_scores.device).view(1, 1, Q, 1).expand(batch_size, H, -1, -1)
-            k_pos = torch.arange(K, device=attn_scores.device).view(1, 1, 1, K)
-            distances = q_pos - k_pos  # [B,H,Q,K]
-            # Per-head window sizes: min_window_size + 10*h for first M heads, unlimited for others
-            h_idx = torch.arange(H, device=attn_scores.device).view(1, H, 1, 1)
-            wins = torch.where(
-                h_idx < M,
-                torch.full_like(h_idx, self.min_window_size) + 10 * h_idx,
-                torch.full_like(h_idx, K - 1),
-            )
-            allowed = (distances >= 0) & (distances <= wins)
-            attn_scores = torch.where(allowed, attn_scores, mask_value)
+            new_attn_scores = attn_scores.clone()
+            Hmask = min(M, num_attention_heads)
+            for i in range(Hmask):
+                # Start with everything masked for this head
+                mask_head = torch.ones_like(attn_scores[:, 0]) * mask_value  # [B, Q, K]
+                # Allow diagonals for lags j in [0..i]
+                for j in range(i + 1):
+                    q_idx = range(j, mask_head.shape[1])
+                    k_idx = range(0, mask_head.shape[2] - j)
+                    mask_head[:, q_idx, k_idx] = 0
+                new_attn_scores[:, i] = attn_scores[:, i] + mask_head
+            attn_scores = new_attn_scores
         
         attn_weights = nn.functional.softmax(attn_scores, dim=-1)
         attn_weights = attn_weights.to(value.dtype)

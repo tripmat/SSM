@@ -35,7 +35,7 @@ def get_model(args, tokenizer):
             num_attention_heads=args.heads,
             num_hidden_layers=args.layers,
             num_masked_heads=getattr(args, "num_masked_heads", 4),
-            min_window_size=getattr(args, "min_window_size", 100),
+            rotary_pct=0.0,
             vocab_size=len(tokenizer),
         )
 
