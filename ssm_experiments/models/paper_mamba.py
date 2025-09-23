@@ -75,8 +75,9 @@ class PaperInformedMambaBlock(nn.Module):
 
         for i in range(L):
             dt_i = dt[:, i]  # (B, D)
-            # Discretize dynamics: A_bar = exp(dt * A), B_bar = dt * B
-            A_bar = torch.exp(dt_i.unsqueeze(-1) * A.unsqueeze(0))        # (B, D, d_state)
+            # Discretize dynamics: A_bar = exp(clamp(dt * A, [-10, 0])) for stability
+            exp_arg = dt_i.unsqueeze(-1) * A.unsqueeze(0)
+            A_bar = torch.exp(torch.clamp(exp_arg, min=-10.0, max=0.0))   # (B, D, d_state)
             B_i = B[:, i]                                                # (B, D, d_state)
             C_i = C[:, i]                                                # (B, D, d_state)
             B_bar = dt_i.unsqueeze(-1) * B_i                              # (B, D, d_state)
