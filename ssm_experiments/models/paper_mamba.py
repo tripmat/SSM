@@ -59,12 +59,10 @@ class PaperInformedMambaBlock(nn.Module):
         # Continuous-time negative rates (stable)
         A = -torch.exp(A_log_clipped)
 
-        # Compute per-channel B and C efficiently via depthwise 1x1 convs
-        xt = x.transpose(1, 2)  # (B, D, L)
-        B_all = self.B_proj(xt)  # (B, D*d_state, L)
-        C_all = self.C_proj(xt)  # (B, D*d_state, L)
-        B = B_all.transpose(1, 2).reshape(batch_size, L, D, self.d_state)
-        C = C_all.transpose(1, 2).reshape(batch_size, L, D, self.d_state)
+        # Note: B and C are kernel_size=1 (pointwise) projections. To avoid
+        # materializing large (B, L, D, d_state) tensors, compute B_i/C_i
+        # per-timestep in the scan loop below. This is mathematically
+        # equivalent and memory-efficient.
 
         # Learn per-token, per-channel timestep and discretize
         dt = F.softplus(self.dt_proj(x))
@@ -78,8 +76,12 @@ class PaperInformedMambaBlock(nn.Module):
             # Discretize dynamics: A_bar = exp(clamp(dt * A, [-10, 0])) for stability
             exp_arg = dt_i.unsqueeze(-1) * A.unsqueeze(0)
             A_bar = torch.exp(torch.clamp(exp_arg, min=-10.0, max=0.0))   # (B, D, d_state)
-            B_i = B[:, i]                                                # (B, D, d_state)
-            C_i = C[:, i]                                                # (B, D, d_state)
+            # Compute per-channel, input-dependent B_i and C_i at timestep i
+            x_i = x[:, i:i+1, :].transpose(1, 2)                         # (B, D, 1)
+            B_i_flat = self.B_proj(x_i).squeeze(-1)                      # (B, D*d_state)
+            C_i_flat = self.C_proj(x_i).squeeze(-1)                      # (B, D*d_state)
+            B_i = B_i_flat.view(batch_size, D, self.d_state)             # (B, D, d_state)
+            C_i = C_i_flat.view(batch_size, D, self.d_state)             # (B, D, d_state)
             B_bar = dt_i.unsqueeze(-1) * B_i                              # (B, D, d_state)
             state_update = states * A_bar + B_bar * x[:, i].unsqueeze(-1) # (B, D, d_state)
             states = torch.clamp(state_update, min=-10.0, max=10.0)
