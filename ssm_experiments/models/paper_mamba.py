@@ -15,7 +15,8 @@ class PaperInformedMambaBlock(nn.Module):
         self.d_state = d_state
 
         self.in_proj = nn.Linear(d_model, d_model * 2)
-        self.conv1d = nn.Conv1d(d_model, d_model, kernel_size=4, padding=2, groups=d_model)
+        # Causal local mixer: no built-in padding; we will apply left-only padding in forward
+        self.conv1d = nn.Conv1d(d_model, d_model, kernel_size=4, padding=0, groups=d_model)
 
         self.A_log = nn.Parameter(torch.randn(d_model, d_state))
         # Depthwise 1x1 convs for per-channel B and C (parameter-efficient)
@@ -47,7 +48,11 @@ class PaperInformedMambaBlock(nn.Module):
         x_and_z = self.in_proj(x)
         x, z = x_and_z.chunk(2, dim=-1)
 
-        x_conv = self.conv1d(x.transpose(1, 2)).transpose(1, 2)
+        # Left-only pad to enforce causality and keep length: pad (kernel_size-1) on the left
+        xt = x.transpose(1, 2)
+        k = self.conv1d.kernel_size[0]
+        xt = F.pad(xt, (k - 1, 0))
+        x_conv = self.conv1d(xt).transpose(1, 2)
         x = F.silu(x_conv)
 
         A_log_clipped = torch.clamp(self.A_log.float(), min=-5.0, max=2.0)
