@@ -520,21 +520,26 @@ def plot_single_model_analysis(model_name, results, checkpoints_dir, args, token
     """Create detailed single model analysis with checkpoint-based length generalization"""
     import glob
 
-    fig = plt.subplots(2, 3, figsize=(18, 12))[0]
+    fig = plt.subplots(3, 3, figsize=(18, 16))[0]
 
     # Get model color and label
     color = MODEL_COLORS.get(model_name, 'gray')
     label = MODEL_LABELS.get(model_name, model_name)
 
     # Top row: Training analysis
-    ax1 = plt.subplot(2, 3, 1)
-    ax2 = plt.subplot(2, 3, 2)
-    ax3 = plt.subplot(2, 3, 3)
+    ax1 = plt.subplot(3, 3, 1)
+    ax2 = plt.subplot(3, 3, 2)
+    ax3 = plt.subplot(3, 3, 3)
 
-    # Bottom row: Length generalization at different checkpoints
-    ax4 = plt.subplot(2, 3, 4)
-    ax5 = plt.subplot(2, 3, 5)
-    ax6 = plt.subplot(2, 3, 6)
+    # Middle row: Length generalization at 30%, 40%, 50% training
+    ax4 = plt.subplot(3, 3, 4)
+    ax5 = plt.subplot(3, 3, 5)
+    ax6 = plt.subplot(3, 3, 6)
+
+    # Bottom row: Length generalization at 60%, 70%, 80% training
+    ax7 = plt.subplot(3, 3, 7)
+    ax8 = plt.subplot(3, 3, 8)
+    ax9 = plt.subplot(3, 3, 9)
 
     # Panel 1: Training Loss Curve
     if 'training' in results and 'losses' in results['training']:
@@ -542,13 +547,13 @@ def plot_single_model_analysis(model_name, results, checkpoints_dir, args, token
         examples = results['training']['training_examples']
         ax1.plot(examples, losses, color=color, linewidth=2)
 
-        # Add dotted lines at 60%, 70%, 80% of training
+        # Add dotted lines at 30%, 40%, 50%, 60%, 70%, 80%, 100% of training
         total_steps = args.steps
         total_examples = total_steps * args.train_batch_size
-        for percentage in [60, 70, 80]:
+        for percentage in [30, 40, 50, 60, 70, 80, 100]:
             target_examples = int(total_examples * percentage / 100)
-            ax1.axvline(x=target_examples, color='gray', linestyle=':', alpha=0.7, linewidth=1,
-                       label=f'{percentage}%' if percentage == 60 else "")
+            ax1.axvline(x=target_examples, color='red', linestyle=':', alpha=0.7, linewidth=1,
+                       label='Training %' if percentage == 30 else "")
 
         ax1.set_xlabel('Training Examples')
         ax1.set_ylabel('Loss')
@@ -590,11 +595,11 @@ def plot_single_model_analysis(model_name, results, checkpoints_dir, args, token
     if max_train_len is not None:
         ax3.legend()
 
-    # Bottom panels: Checkpoint-based length generalization
+    # Middle and Bottom panels: Checkpoint-based length generalization
     total_steps = args.steps
     total_examples = total_steps * args.train_batch_size  # Convert steps to training examples
-    checkpoint_percentages = [60, 70, 80]  # 60%, 70%, 80% of training
-    checkpoint_axes = [ax4, ax5, ax6]
+    checkpoint_percentages = [30, 40, 50, 60, 70, 80]  # 30%, 40%, 50%, 60%, 70%, 80% of training
+    checkpoint_axes = [ax4, ax5, ax6, ax7, ax8, ax9]
 
     from ..evaluate import evaluate_length_generalization
     from ..models.registry import get_model
@@ -674,9 +679,9 @@ def plot_single_model_analysis(model_name, results, checkpoints_dir, args, token
         ax.set_ylim(0, 100)
         ax.grid(True, alpha=0.3)
 
-    plt.suptitle(f'{label} - Detailed Analysis with Overfitting Progression', fontsize=16, y=0.95)
+    plt.suptitle(f'{label} - Detailed Analysis with Overfitting Progression', fontsize=16, y=0.96)
     plt.tight_layout()
-    plt.subplots_adjust(top=0.90)
+    plt.subplots_adjust(top=0.92)
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.close()
     print(f"Single model analysis saved to: {save_path}")
