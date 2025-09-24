@@ -3,6 +3,9 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
+import torch
+import pickle
+import os
 
 plt.style.use('default')
 sns.set_palette("husl")
@@ -511,3 +514,157 @@ def plot_all_models_comparison(results_dict, save_path="all_models_comparison.pn
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.close()
     print(f"All models comparison plot saved to: {save_path}")
+
+
+def plot_single_model_analysis(model_name, results, checkpoints_dir, args, tokenizer, TO_TOKEN, device, save_path):
+    """Create detailed single model analysis with checkpoint-based length generalization"""
+    import glob
+
+    fig = plt.subplots(2, 3, figsize=(18, 12))[0]
+
+    # Get model color and label
+    color = MODEL_COLORS.get(model_name, 'gray')
+    label = MODEL_LABELS.get(model_name, model_name)
+
+    # Top row: Training analysis
+    ax1 = plt.subplot(2, 3, 1)
+    ax2 = plt.subplot(2, 3, 2)
+    ax3 = plt.subplot(2, 3, 3)
+
+    # Bottom row: Length generalization at different checkpoints
+    ax4 = plt.subplot(2, 3, 4)
+    ax5 = plt.subplot(2, 3, 5)
+    ax6 = plt.subplot(2, 3, 6)
+
+    # Panel 1: Training Loss Curve
+    if 'training' in results and 'losses' in results['training']:
+        losses = results['training']['losses']
+        examples = results['training']['training_examples']
+        ax1.plot(examples, losses, color=color, linewidth=2)
+        ax1.set_xlabel('Training Examples')
+        ax1.set_ylabel('Loss')
+        ax1.set_title('Training Loss')
+        ax1.set_yscale('log')
+        ax1.grid(True, alpha=0.3)
+
+    # Panel 2: Training Accuracy Progress
+    if 'training' in results and 'accuracies' in results['training']:
+        accuracies = results['training']['accuracies']
+        acc_examples = results['training']['accuracy_training_examples']
+        if accuracies and acc_examples:
+            ax2.plot(acc_examples, accuracies, color=color, linewidth=2, marker='o', markersize=3)
+            ax2.set_xlabel('Training Examples')
+            ax2.set_ylabel('Accuracy (%)')
+            ax2.set_title('Training Accuracy Progress')
+            ax2.set_ylim(0, 100)
+            ax2.grid(True, alpha=0.3)
+
+    # Panel 3: Final Length Generalization
+    max_train_len = None
+    if 'length_gen' in results and results['length_gen']:
+        lengths = [r['length'] for r in results['length_gen']]
+        accuracies = [r['accuracy'] for r in results['length_gen']]
+        ax3.plot(lengths, accuracies, color=color, linewidth=2, marker='s', markersize=3)
+
+        # Get max_train_len from config
+        if 'config' in results:
+            max_train_len = results['config'].get('max_train_len', 50)
+            ax3.axvline(x=max_train_len, color='red', linestyle='--', alpha=0.7, linewidth=2,
+                       label=f'Max train length ({max_train_len})')
+
+    ax3.set_xlabel('Sequence Length')
+    ax3.set_ylabel('Accuracy (%)')
+    ax3.set_title('Final Length Generalization')
+    ax3.set_ylim(0, 100)
+    ax3.grid(True, alpha=0.3)
+    if max_train_len is not None:
+        ax3.legend()
+
+    # Bottom panels: Checkpoint-based length generalization
+    total_steps = args.steps
+    checkpoint_percentages = [60, 70, 80]  # 60%, 70%, 80% of training
+    checkpoint_axes = [ax4, ax5, ax6]
+
+    from ..evaluate import evaluate_length_generalization
+    from ..models.registry import get_model
+
+    for i, (percentage, ax) in enumerate(zip(checkpoint_percentages, checkpoint_axes)):
+        target_step = int(total_steps * percentage / 100)
+
+        # Find closest checkpoint to target step
+        checkpoint_pattern = os.path.join(checkpoints_dir, f"{model_name}_step_*.pth")
+        checkpoint_files = glob.glob(checkpoint_pattern)
+
+        if not checkpoint_files:
+            ax.text(0.5, 0.5, f'No checkpoints found', ha='center', va='center', transform=ax.transAxes)
+            ax.set_title(f'Length Gen. at {percentage}% Training')
+            continue
+
+        # Find checkpoint closest to target step
+        def extract_step(filepath):
+            try:
+                filename = os.path.basename(filepath)
+                step_part = filename.split('_step_')[1].split('.pth')[0]
+                return int(step_part)
+            except (IndexError, ValueError):
+                return 0
+
+        checkpoint_steps = [(extract_step(f), f) for f in checkpoint_files]
+        checkpoint_steps.sort(key=lambda x: abs(x[0] - target_step))
+
+        if checkpoint_steps:
+            closest_step, closest_file = checkpoint_steps[0]
+
+            try:
+                # Load model from checkpoint
+                eval_model = get_model(args, tokenizer)
+
+                # Load checkpoint
+                try:
+                    checkpoint = torch.load(closest_file, map_location='cpu', weights_only=True)
+                except (TypeError, RuntimeError, pickle.UnpicklingError):
+                    checkpoint = torch.load(closest_file, map_location='cpu', weights_only=False)
+
+                if 'model_state_dict' in checkpoint:
+                    model_state_dict = checkpoint['model_state_dict']
+                else:
+                    model_state_dict = checkpoint
+
+                eval_model.load_state_dict(model_state_dict)
+                eval_model = eval_model.to(device)
+                eval_model.eval()
+
+                # Evaluate length generalization
+                print(f"  Evaluating {model_name} checkpoint at step {closest_step} ({percentage}% of training)...")
+                with torch.no_grad():
+                    length_results = evaluate_length_generalization(args, eval_model, tokenizer, TO_TOKEN, device=device)
+
+                # Plot results
+                if length_results:
+                    lengths = [r['length'] for r in length_results]
+                    accuracies = [r['accuracy'] for r in length_results]
+                    ax.plot(lengths, accuracies, color=color, linewidth=2, marker='s', markersize=3)
+
+                    # Add training length line
+                    if max_train_len is not None:
+                        ax.axvline(x=max_train_len, color='red', linestyle='--', alpha=0.5, linewidth=1)
+
+                ax.set_title(f'Length Gen. at {percentage}% Training\n(Step {closest_step})')
+
+            except Exception as e:
+                print(f"  Warning: Failed to evaluate checkpoint at step {closest_step}: {e}")
+                ax.text(0.5, 0.5, f'Evaluation failed\n{str(e)[:50]}...',
+                       ha='center', va='center', transform=ax.transAxes, fontsize=8)
+                ax.set_title(f'Length Gen. at {percentage}% Training')
+
+        ax.set_xlabel('Sequence Length')
+        ax.set_ylabel('Accuracy (%)')
+        ax.set_ylim(0, 100)
+        ax.grid(True, alpha=0.3)
+
+    plt.suptitle(f'{label} - Detailed Analysis with Overfitting Progression', fontsize=16, y=0.95)
+    plt.tight_layout()
+    plt.subplots_adjust(top=0.90)
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"Single model analysis saved to: {save_path}")

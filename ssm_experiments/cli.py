@@ -16,7 +16,7 @@ from .data import get_tokenizer, get_train_dataset, CopyDataset
 from .train import train_model
 from .evaluate import offline_accuracy_evaluation, evaluate_length_generalization, generate_fixed_eval_dataset
 from .utils.parameter_matching import get_optimal_configs, count_parameters
-from .utils.plotting import plot_all_models_comparison
+from .utils.plotting import plot_all_models_comparison, plot_single_model_analysis
 
 
 def main():
@@ -672,6 +672,11 @@ def main():
         # Generate updated comparison plot after each model
         print(f"Updating comparison plot with {len(results)} model(s)...")
         plot_all_models_comparison(results, os.path.join(figures_dir, 'all_models_comparison.png'))
+
+        # Generate detailed single model analysis with overfitting progression
+        print(f"Generating detailed analysis for {model_name}...")
+        single_model_path = os.path.join(figures_dir, f'{model_name}_detailed_analysis.png')
+        plot_single_model_analysis(model_name, results_obj, checkpoints_dir, args, tokenizer, TO_TOKEN, device, single_model_path)
 
         # Save updated results cache for future runs
         save_experiment_results(figures_dir, results, experiment_config)
