@@ -7,6 +7,7 @@ from datetime import datetime
 import atexit
 import random
 import shutil
+import pickle
 import numpy as np
 import torch
 
@@ -15,7 +16,7 @@ from .data import get_tokenizer, get_train_dataset, CopyDataset
 from .train import train_model
 from .evaluate import offline_accuracy_evaluation, evaluate_length_generalization, generate_fixed_eval_dataset
 from .utils.parameter_matching import get_optimal_configs, count_parameters
-from .utils.plotting import plot_paper_reproduction, create_comparison_table, plot_all_models_comparison
+from .utils.plotting import plot_all_models_comparison
 
 
 def main():
@@ -153,8 +154,10 @@ def main():
                 # Load checkpoint weights
                 try:
                     checkpoint = torch.load(checkpoint_file, map_location='cpu', weights_only=True)
-                except TypeError:
-                    checkpoint = torch.load(checkpoint_file, map_location='cpu')
+                except (TypeError, RuntimeError, pickle.UnpicklingError) as e:
+                    # Fallback for comprehensive checkpoints containing RNG states
+                    print(f"  Note: Loading with weights_only=False due to RNG states in checkpoint")
+                    checkpoint = torch.load(checkpoint_file, map_location='cpu', weights_only=False)
 
                 if not isinstance(checkpoint, dict):
                     raise ValueError("Unexpected checkpoint content")
@@ -198,6 +201,70 @@ def main():
                 accuracy_training_examples.append((step - 1) * args.train_batch_size)
 
         return accuracies, accuracy_training_examples
+
+    def load_compatible_results(figures_dir, current_config):
+        """Load existing results that have compatible experiment configuration"""
+        results_cache_path = os.path.join(figures_dir, 'current_experiment_results.json')
+        config_cache_path = os.path.join(figures_dir, 'current_experiment_config.json')
+
+        if not os.path.exists(results_cache_path) or not os.path.exists(config_cache_path):
+            return {}, current_config
+
+        try:
+            # Load cached config
+            with open(config_cache_path, 'r') as f:
+                cached_config = json.load(f)
+
+            # Load cached results
+            with open(results_cache_path, 'r') as f:
+                cached_results = json.load(f)
+
+            # Check if configs are identical
+            if cached_config == current_config:
+                print(f"Found compatible previous results with {len(cached_results)} models")
+                return cached_results, current_config
+            else:
+                print("Previous results found but configuration doesn't match - starting fresh")
+                return {}, current_config
+
+        except Exception as e:
+            print(f"Warning: Failed to load cached results: {e}")
+            return {}, current_config
+
+    def save_experiment_results(figures_dir, results, experiment_config):
+        """Save current experiment results and config for future compatibility checking"""
+        results_cache_path = os.path.join(figures_dir, 'current_experiment_results.json')
+        config_cache_path = os.path.join(figures_dir, 'current_experiment_config.json')
+
+        # Convert results to serializable format
+        serializable_results = {}
+        for name, r in results.items():
+            if r is not None:
+                serializable_results[name] = {
+                    'training': {
+                        'losses': [float(x) for x in r['training']['losses']],
+                        'training_examples': r['training']['training_examples'],
+                        'training_time': r['training']['training_time'],
+                        'accuracies': r['training']['accuracies'],
+                        'accuracy_training_examples': r['training']['accuracy_training_examples'],
+                    },
+                    'fixed_accuracy': r['fixed_accuracy'],
+                    'length_gen': r['length_gen'],
+                    'param_count': r['param_count'],
+                    'config': r['config'],
+                }
+
+        try:
+            # Save results
+            with open(results_cache_path, 'w') as f:
+                json.dump(serializable_results, f, indent=2)
+
+            # Save config separately for easy comparison
+            with open(config_cache_path, 'w') as f:
+                json.dump(experiment_config, f, indent=2)
+
+        except Exception as e:
+            print(f"Warning: Failed to save experiment cache: {e}")
 
     def check_existing_results(model_name, args, checkpoints_dir):
         """Check if a model has already been trained to completion"""
@@ -320,7 +387,24 @@ def main():
                 setattr(argobj, k, v)
         return argobj
 
-    results = {}
+    # Setup outputs directories early (needed for config matching)
+    outputs_dir = os.path.abspath(args_cli.outputs)
+    checkpoints_dir = os.path.join(outputs_dir, 'checkpoints')
+    figures_dir = os.path.join(outputs_dir, 'figures')
+    os.makedirs(checkpoints_dir, exist_ok=True)
+    os.makedirs(figures_dir, exist_ok=True)
+
+    # Setup experiment config for matching - use the full user_config or create default
+    if user_config:
+        experiment_config = user_config.copy()  # Use the loaded JSON config
+        print("Using provided JSON config for compatibility matching")
+    else:
+        experiment_config = {"note": "no_config_file_provided", "args_cli": vars(args_cli)}
+        print("No config file provided - using CLI arguments for compatibility matching")
+
+    # Load existing compatible results (if any)
+    results, _ = load_compatible_results(figures_dir, experiment_config)
+
     # If user provided target params and/or constraints, pass them through to matching
     target_params = None
     transformer_heads = None
@@ -395,12 +479,7 @@ def main():
     print("Starting experiments...")
     print("=" * 60)
 
-    # Outputs layout
-    outputs_dir = os.path.abspath(args_cli.outputs)
-    checkpoints_dir = os.path.join(outputs_dir, 'checkpoints')
-    figures_dir = os.path.join(outputs_dir, 'figures')
-    os.makedirs(checkpoints_dir, exist_ok=True)
-    os.makedirs(figures_dir, exist_ok=True)
+    # Outputs directories already created earlier
 
     for model_name, config in configs.items():
         print(f"\nProcessing {model_name.upper()}...")
@@ -517,8 +596,9 @@ def main():
             # Safe load: prefer weights_only when available; validate type
             try:
                 checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=True)  # type: ignore[arg-type]
-            except TypeError:
-                checkpoint = torch.load(checkpoint_path, map_location='cpu')
+            except (TypeError, RuntimeError, pickle.UnpicklingError):
+                # Fallback for comprehensive checkpoints containing RNG states
+                checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
 
             if not isinstance(checkpoint, dict):
                 raise ValueError("Unexpected checkpoint content (expected a dict)")
@@ -572,53 +652,39 @@ def main():
         print(f"Final training loss: {results_obj['training']['losses'][-1]:.4f}")
         print(f"Training time: {results_obj['training']['training_time']:.1f}s")
 
-    # Plots and summary
-    print(f"\nGenerating plots in {figures_dir}...")
+        # Generate updated comparison plot after each model
+        print(f"Updating comparison plot with {len(results)} model(s)...")
+        plot_all_models_comparison(results, os.path.join(figures_dir, 'all_models_comparison.png'))
 
-    # Generate comprehensive comparison of all models
-    plot_all_models_comparison(results, os.path.join(figures_dir, 'all_models_comparison.png'))
+        # Save updated results cache for future runs
+        save_experiment_results(figures_dir, results, experiment_config)
 
-    # Generate traditional plots for backward compatibility
-    has_t = 'transformer_rope' in results
-    has_m = 'mamba' in results
-    if has_t and has_m:
-        plot_paper_reproduction(results['transformer_rope'], results['mamba'],
-                                os.path.join(figures_dir, 'paper_reproduction.png'))
-        from .utils.plotting import plot_comprehensive_summary, plot_comparison
-        plot_comprehensive_summary(results['transformer_rope'], results['mamba'],
-                                   os.path.join(figures_dir, 'comprehensive_summary.png'))
-        plot_comparison(results['transformer_rope'], results['mamba'],
-                        os.path.join(figures_dir, 'comparison_overview.png'))
-        create_comparison_table(results['transformer_rope'], results['mamba'])
-    elif has_t:
-        # Skip generating standalone Transformer figures to reduce clutter.
-        # Previously generated: transformer_length_generalization.png and transformer_comprehensive_summary.png
-        print("Only Transformer run; skipping standalone Transformer figures.")
-    elif has_m:
-        from .utils.plotting import plot_length_gen_single, plot_comprehensive_summary
-        plot_length_gen_single(results['mamba'], 'GSSM: Mamba',
-                               os.path.join(figures_dir, 'mamba_length_generalization.png'))
-        plot_comprehensive_summary(None, results['mamba'],
-                                   os.path.join(figures_dir, 'mamba_comprehensive_summary.png'))
-        print("Only Mamba run; comparison plot skipped.")
+    # Final experiment summary
+    print(f"\n{'='*60}")
+    print("EXPERIMENT COMPLETED")
+    print(f"{'='*60}")
+    print(f"Models trained: {len(results)}")
+    print(f"Final comparison plot: {os.path.join(figures_dir, 'all_models_comparison.png')}")
 
+    # Save final detailed results
     results_file = os.path.join(outputs_dir, "experiment_results.json")
     with open(results_file, 'w') as f:
         serializable_results = {}
         for name, r in results.items():
-            serializable_results[name] = {
-                'training': {
-                    'losses': [float(x) for x in r['training']['losses']],
-                    'training_examples': r['training']['training_examples'],
-                    'training_time': r['training']['training_time'],
-                    'accuracies': r['training']['accuracies'],
-                    'accuracy_training_examples': r['training']['accuracy_training_examples'],
-                },
-                'fixed_accuracy': r['fixed_accuracy'],
-                'length_gen': r['length_gen'],
-                'param_count': r['param_count'],
-                'config': r['config'],
-            }
+            if r is not None:
+                serializable_results[name] = {
+                    'training': {
+                        'losses': [float(x) for x in r['training']['losses']],
+                        'training_examples': r['training']['training_examples'],
+                        'training_time': r['training']['training_time'],
+                        'accuracies': r['training']['accuracies'],
+                        'accuracy_training_examples': r['training']['accuracy_training_examples'],
+                    },
+                    'fixed_accuracy': r['fixed_accuracy'],
+                    'length_gen': r['length_gen'],
+                    'param_count': r['param_count'],
+                    'config': r['config'],
+                }
         json.dump(serializable_results, f, indent=2)
     print(f"Detailed results saved to: {results_file}")
 
