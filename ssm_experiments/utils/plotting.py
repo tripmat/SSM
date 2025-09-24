@@ -452,6 +452,7 @@ def plot_all_models_comparison(results_dict, save_path="all_models_comparison.pn
     ax2.set_ylim(0, 100)
 
     # Plot 3: Length Generalization
+    max_train_len = None
     for model_name, results in valid_results.items():
         if 'length_gen' in results and results['length_gen']:
             lengths = [r['length'] for r in results['length_gen']]
@@ -460,6 +461,15 @@ def plot_all_models_comparison(results_dict, save_path="all_models_comparison.pn
             label = MODEL_LABELS.get(model_name, model_name)
             ax3.plot(lengths, accuracies, color=color, linewidth=2,
                     marker='s', markersize=3, label=label, alpha=0.8)
+
+        # Extract max_train_len from first available model config
+        if max_train_len is None and 'config' in results:
+            max_train_len = results['config'].get('max_train_len', 50)  # fallback to 50
+
+    # Add vertical line showing max training length
+    if max_train_len is not None:
+        ax3.axvline(x=max_train_len, color='red', linestyle='--', alpha=0.7, linewidth=2,
+                   label=f'Max train length ({max_train_len})')
 
     ax3.set_xlabel('Sequence Length')
     ax3.set_ylabel('Accuracy (%)')
