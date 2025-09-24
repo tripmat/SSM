@@ -38,7 +38,7 @@ def main():
     parser.add_argument('--config', type=str, default=None,
                         help='Path to JSON config file to override global and per-model parameters')
     parser.add_argument('--only', type=str,
-                        choices=['all', 'transformer', 'mamba', 'paper_mamba', 'transformer_rope', 'transformer_nope',
+                        choices=['all', 'transformer', 'paper_mamba', 'transformer_rope', 'transformer_nope',
                                 'transformer_alibi', 'transformer_hard_alibi'],
                         default='all',
                         help='Select which model(s) to run')
@@ -112,6 +112,92 @@ def main():
             log_fh.close()
         except Exception:
             pass
+
+    def evaluate_checkpoints_during_training(model_name, args, checkpoints_dir, tokenizer, TO_TOKEN, fixed_eval_dataset, device):
+        """Evaluate all saved checkpoints to reconstruct training-time accuracy curve"""
+        import glob
+
+        # Find all checkpoint files for this model
+        checkpoint_pattern = os.path.join(checkpoints_dir, f"{model_name}_step_*.pth")
+        checkpoint_files = glob.glob(checkpoint_pattern)
+
+        if not checkpoint_files:
+            print(f"No checkpoints found for {model_name}")
+            return [], []
+
+        # Sort by step number
+        def extract_step(filepath):
+            try:
+                filename = os.path.basename(filepath)
+                # Extract step number from filename like "model_name_step_50.pth"
+                step_part = filename.split('_step_')[1].split('.pth')[0]
+                return int(step_part)
+            except (IndexError, ValueError):
+                return 0
+
+        checkpoint_files.sort(key=extract_step)
+
+        accuracies = []
+        accuracy_training_examples = []
+
+        print(f"Evaluating {len(checkpoint_files)} checkpoints for {model_name}...")
+
+        for checkpoint_file in checkpoint_files:
+            step = extract_step(checkpoint_file)
+            print(f"Evaluating checkpoint at step {step}...")
+
+            try:
+                # Create fresh model instance
+                eval_model = get_model(args, tokenizer)
+
+                # Load checkpoint weights
+                try:
+                    checkpoint = torch.load(checkpoint_file, map_location='cpu', weights_only=True)
+                except TypeError:
+                    checkpoint = torch.load(checkpoint_file, map_location='cpu')
+
+                if not isinstance(checkpoint, dict):
+                    raise ValueError("Unexpected checkpoint content")
+
+                # Handle both old format (direct state_dict) and new format (comprehensive checkpoint)
+                if 'model_state_dict' in checkpoint:
+                    # New comprehensive format
+                    model_state_dict = checkpoint['model_state_dict']
+
+                    # Restore RNG states for deterministic evaluation
+                    if 'torch_rng_state' in checkpoint:
+                        torch.set_rng_state(checkpoint['torch_rng_state'])
+                    if 'numpy_rng_state' in checkpoint:
+                        np.random.set_state(checkpoint['numpy_rng_state'])
+                    if 'random_rng_state' in checkpoint:
+                        random.setstate(checkpoint['random_rng_state'])
+                    if device == 'cuda':
+                        if 'cuda_rng_state' in checkpoint:
+                            torch.cuda.set_rng_state(checkpoint['cuda_rng_state'])
+                        if 'cuda_rng_state_all' in checkpoint:
+                            torch.cuda.set_rng_state_all(checkpoint['cuda_rng_state_all'])
+                else:
+                    # Old format (direct state_dict) for backward compatibility
+                    model_state_dict = checkpoint
+
+                eval_model.load_state_dict(model_state_dict)
+                eval_model = eval_model.to(device)
+                eval_model.eval()
+
+                # Evaluate accuracy
+                with torch.no_grad():
+                    accuracy = offline_accuracy_evaluation(eval_model, fixed_eval_dataset, args, tokenizer, TO_TOKEN, device=device)
+                    accuracies.append(accuracy)
+                    # Convert step to training examples (step is 1-indexed, but step * batch_size gives examples after that step)
+                    accuracy_training_examples.append((step - 1) * args.train_batch_size)
+                    print(f"Step {step}: Accuracy = {accuracy:.1f}%")
+
+            except Exception as e:
+                print(f"Warning: Failed to evaluate checkpoint at step {step}: {e}")
+                accuracies.append(0.0)
+                accuracy_training_examples.append((step - 1) * args.train_batch_size)
+
+        return accuracies, accuracy_training_examples
 
     def check_existing_results(model_name, args, checkpoints_dir):
         """Check if a model has already been trained to completion"""
@@ -287,13 +373,9 @@ def main():
     # Optional filtering to run specific models
     if args_cli.only == 'transformer':
         configs = {k: v for k, v in configs.items() if k.startswith('transformer')}
-    elif args_cli.only == 'mamba':
-        configs = {k: v for k, v in configs.items() if k == 'mamba'}
     elif args_cli.only == 'all':
-        # Exclude the optimized 'mamba' when running "all"; keep paper_mamba + transformers
-        if 'mamba' in configs:
-            configs.pop('mamba')
-            print("Note: excluding 'mamba' from 'all'. Use --only mamba to run it.")
+        # Run all available models (paper_mamba + transformers)
+        pass  # Keep all configs as-is
     else:
         # Run specific model only
         configs = {k: v for k, v in configs.items() if k == args_cli.only}
@@ -406,7 +488,6 @@ def main():
             device=device,
             checkpoint_dir=checkpoints_dir,
             model_name=model_name,
-            fixed_eval_dataset=fixed_eval_dataset,
         )
 
         # Save final model checkpoint BEFORE evaluation, then reload for eval to ensure parity
@@ -420,17 +501,40 @@ def main():
         except Exception as e:
             print(f"Warning: failed to save model checkpoint: {e}")
 
+        # Evaluate all checkpoints to reconstruct training-time accuracy curve
+        print("Evaluating checkpoints from training...")
+        checkpoint_accuracies, checkpoint_accuracy_examples = evaluate_checkpoints_during_training(
+            model_name, args, checkpoints_dir, tokenizer, TO_TOKEN, fixed_eval_dataset, device
+        )
+
+        # Add checkpoint accuracies to training results
+        training_results['accuracies'] = checkpoint_accuracies
+        training_results['accuracy_training_examples'] = checkpoint_accuracy_examples
+
         # Recreate model and load saved weights for evaluation (parity with post-run evals)
         try:
             eval_model = get_model(args, tokenizer)
             # Safe load: prefer weights_only when available; validate type
             try:
-                state_dict = torch.load(checkpoint_path, map_location='cpu', weights_only=True)  # type: ignore[arg-type]
+                checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=True)  # type: ignore[arg-type]
             except TypeError:
-                state_dict = torch.load(checkpoint_path, map_location='cpu')
-            if not isinstance(state_dict, dict) or not all(hasattr(v, 'size') for v in state_dict.values()):
-                raise ValueError("Unexpected checkpoint content (expected a state_dict mapping)")
-            eval_model.load_state_dict(state_dict)
+                checkpoint = torch.load(checkpoint_path, map_location='cpu')
+
+            if not isinstance(checkpoint, dict):
+                raise ValueError("Unexpected checkpoint content (expected a dict)")
+
+            # Handle both old format (direct state_dict) and new format (comprehensive checkpoint)
+            if 'model_state_dict' in checkpoint:
+                # New comprehensive format
+                model_state_dict = checkpoint['model_state_dict']
+            else:
+                # Old format (direct state_dict) - check if it looks like a state_dict
+                if all(hasattr(v, 'size') for v in checkpoint.values() if torch.is_tensor(v)):
+                    model_state_dict = checkpoint
+                else:
+                    raise ValueError("Unexpected checkpoint content (not a valid state_dict)")
+
+            eval_model.load_state_dict(model_state_dict)
             print("Reloaded model from final checkpoint for evaluation.")
         except Exception as e:
             print(f"Warning: failed to reload model from checkpoint: {e}. Using in-memory model for eval.")

@@ -2,6 +2,8 @@ import os
 import time
 import math
 import sys
+import random
+import numpy as np
 from tqdm import tqdm
 import torch
 from torch.nn import CrossEntropyLoss
@@ -175,27 +177,29 @@ def train_model(args, model, train_dataset, TO_TOKEN, tokenizer, device=None, ch
         losses.append(loss.item())
         training_examples.append(step * args.train_batch_size)
 
-        if checkpoint_dir and model_name and fixed_eval_dataset and (step + 1) % 50 == 0:
+        if checkpoint_dir and model_name and (step + 1) % 100 == 0:
             print(f"\nSaving checkpoint at step {step + 1}...")
             os.makedirs(checkpoint_dir, exist_ok=True)
             checkpoint_path = os.path.join(checkpoint_dir, f"{model_name}_step_{step + 1}.pth")
-            torch.save(model.state_dict(), checkpoint_path)
 
-            current_training_state = model.training
-            model.eval()
-            try:
-                from .evaluate import offline_accuracy_evaluation
-                with torch.no_grad():
-                    accuracy = offline_accuracy_evaluation(model, fixed_eval_dataset, args, tokenizer, TO_TOKEN, device=device)
-                    accuracies.append(accuracy)
-                    accuracy_training_examples.append(step * args.train_batch_size)
-                    print(f"Step {step + 1}: Accuracy = {accuracy:.1f}%")
-            except Exception as e:
-                print(f"Warning: Evaluation failed at step {step + 1}: {e}")
-                accuracies.append(0.0)
-                accuracy_training_examples.append(step * args.train_batch_size)
-            finally:
-                model.train(current_training_state)
+            # Save comprehensive checkpoint including all model state
+            checkpoint = {
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'lr_scheduler_state_dict': lr_scheduler.state_dict(),
+                'step': step + 1,
+                'loss': loss.item(),
+                'torch_rng_state': torch.get_rng_state(),
+                'numpy_rng_state': np.random.get_state(),
+                'random_rng_state': random.getstate(),
+            }
+
+            # Add CUDA RNG state if using GPU
+            if device == 'cuda':
+                checkpoint['cuda_rng_state'] = torch.cuda.get_rng_state()
+                checkpoint['cuda_rng_state_all'] = torch.cuda.get_rng_state_all()
+
+            torch.save(checkpoint, checkpoint_path)
 
         if is_tty:
             progress_bar.set_postfix_str(
