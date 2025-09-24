@@ -541,11 +541,21 @@ def plot_single_model_analysis(model_name, results, checkpoints_dir, args, token
         losses = results['training']['losses']
         examples = results['training']['training_examples']
         ax1.plot(examples, losses, color=color, linewidth=2)
+
+        # Add dotted lines at 60%, 70%, 80% of training
+        total_steps = args.steps
+        total_examples = total_steps * args.train_batch_size
+        for percentage in [60, 70, 80]:
+            target_examples = int(total_examples * percentage / 100)
+            ax1.axvline(x=target_examples, color='gray', linestyle=':', alpha=0.7, linewidth=1,
+                       label=f'{percentage}%' if percentage == 60 else "")
+
         ax1.set_xlabel('Training Examples')
         ax1.set_ylabel('Loss')
         ax1.set_title('Training Loss')
         ax1.set_yscale('log')
         ax1.grid(True, alpha=0.3)
+        ax1.legend()
 
     # Panel 2: Training Accuracy Progress
     if 'training' in results and 'accuracies' in results['training']:
@@ -582,6 +592,7 @@ def plot_single_model_analysis(model_name, results, checkpoints_dir, args, token
 
     # Bottom panels: Checkpoint-based length generalization
     total_steps = args.steps
+    total_examples = total_steps * args.train_batch_size  # Convert steps to training examples
     checkpoint_percentages = [60, 70, 80]  # 60%, 70%, 80% of training
     checkpoint_axes = [ax4, ax5, ax6]
 
@@ -589,7 +600,8 @@ def plot_single_model_analysis(model_name, results, checkpoints_dir, args, token
     from ..models.registry import get_model
 
     for i, (percentage, ax) in enumerate(zip(checkpoint_percentages, checkpoint_axes)):
-        target_step = int(total_steps * percentage / 100)
+        target_examples = int(total_examples * percentage / 100)
+        target_step = int(target_examples / args.train_batch_size)  # Convert back to step for checkpoint finding
 
         # Find closest checkpoint to target step
         checkpoint_pattern = os.path.join(checkpoints_dir, f"{model_name}_step_*.pth")
@@ -649,7 +661,7 @@ def plot_single_model_analysis(model_name, results, checkpoints_dir, args, token
                     if max_train_len is not None:
                         ax.axvline(x=max_train_len, color='red', linestyle='--', alpha=0.5, linewidth=1)
 
-                ax.set_title(f'Length Gen. at {percentage}% Training\n(Step {closest_step})')
+                ax.set_title(f'Length Gen. at {percentage}% Training\n(Step {closest_step}, {closest_step * args.train_batch_size} examples)')
 
             except Exception as e:
                 print(f"  Warning: Failed to evaluate checkpoint at step {closest_step}: {e}")
