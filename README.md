@@ -45,7 +45,7 @@ Example:
 
 This repository is a slim reproduction of experiments from:
 
-**"Repeat After Me: Transformers are Better than State Space Models at Copying"**
+**["Repeat After Me: Transformers are Better than State Space Models at Copying"](https://arxiv.org/abs/2402.01032)**
 *Samy Jelassi, David Brandfonbrener, Sham M. Kakade, Eran Malach*
 
 - **Paper**: [arXiv:2402.01032](https://arxiv.org/abs/2402.01032) (2024)
