@@ -20,6 +20,23 @@ from .utils.plotting import plot_all_models_comparison
 
 
 def main():
+    # Suppress HuggingFace transformers warnings
+    import warnings
+    import logging
+
+    # Suppress specific HuggingFace warnings
+    warnings.filterwarnings("ignore", message=".*has generative capabilities.*")
+    warnings.filterwarnings("ignore", message=".*GenerationMixin.*")
+    warnings.filterwarnings("ignore", category=FutureWarning, module="transformers")
+
+    # Suppress PyTorch warnings
+    warnings.filterwarnings("ignore", message=".*torch.load.*weights_only.*")
+    warnings.filterwarnings("ignore", category=FutureWarning, module="torch")
+
+    # Set logging levels to reduce verbose output
+    logging.getLogger("transformers").setLevel(logging.ERROR)
+    logging.getLogger("torch").setLevel(logging.ERROR)
+
     # Set CUBLAS configuration for deterministic GPU training
     os.environ.setdefault('CUBLAS_WORKSPACE_CONFIG', ':4096:8')
 

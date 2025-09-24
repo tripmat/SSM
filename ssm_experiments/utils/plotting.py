@@ -7,6 +7,23 @@ import seaborn as sns
 plt.style.use('default')
 sns.set_palette("husl")
 
+# Color scheme for different models
+MODEL_COLORS = {
+    'transformer_rope': '#1f77b4',
+    'transformer_nope': '#ff7f0e',
+    'transformer_alibi': '#2ca02c',
+    'transformer_hard_alibi': '#d62728',
+    'mamba': '#9467bd',
+}
+
+MODEL_LABELS = {
+    'transformer_rope': 'Transformer: RoPE',
+    'transformer_nope': 'Transformer: No PE',
+    'transformer_alibi': 'Transformer: ALiBi',
+    'transformer_hard_alibi': 'Transformer: Hard ALiBi',
+    'mamba': 'GSSM: Mamba',
+}
+
 
 def plot_paper_reproduction(transformer_results, mamba_results, save_path="paper_reproduction.png"):
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
@@ -385,3 +402,102 @@ def plot_comparison(transformer_results, mamba_results, save_path="comparison_ov
     plt.tight_layout()
     plt.savefig(save_path, dpi=300, bbox_inches='tight', facecolor='white')
     plt.close()
+
+
+def plot_all_models_comparison(results_dict, save_path="all_models_comparison.png"):
+    """Create comprehensive comparison plot for all models"""
+
+    # Filter out None results
+    valid_results = {k: v for k, v in results_dict.items() if v is not None}
+
+    if len(valid_results) < 1:
+        print("No valid results to plot")
+        return
+
+    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 12))
+
+    # Plot 1: Training Loss Curves
+    for model_name, results in valid_results.items():
+        if 'training' in results and 'losses' in results['training']:
+            losses = results['training']['losses']
+            examples = results['training']['training_examples']
+            color = MODEL_COLORS.get(model_name, 'gray')
+            label = MODEL_LABELS.get(model_name, model_name)
+            ax1.plot(examples, losses, color=color, linewidth=2, label=label, alpha=0.8)
+
+    ax1.set_xlabel('Training Examples')
+    ax1.set_ylabel('Loss')
+    ax1.set_title('Training Loss Curves')
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
+    ax1.set_yscale('log')
+
+    # Plot 2: Training Accuracy (if available)
+    for model_name, results in valid_results.items():
+        if ('training' in results and 'accuracies' in results['training'] and
+            'accuracy_training_examples' in results['training']):
+            accuracies = results['training']['accuracies']
+            examples = results['training']['accuracy_training_examples']
+            if accuracies and examples:
+                color = MODEL_COLORS.get(model_name, 'gray')
+                label = MODEL_LABELS.get(model_name, model_name)
+                ax2.plot(examples, accuracies, color=color, linewidth=2,
+                        marker='o', markersize=4, label=label, alpha=0.8)
+
+    ax2.set_xlabel('Training Examples')
+    ax2.set_ylabel('Accuracy (%)')
+    ax2.set_title('Training Accuracy Progress')
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
+    ax2.set_ylim(0, 100)
+
+    # Plot 3: Length Generalization
+    for model_name, results in valid_results.items():
+        if 'length_gen' in results and results['length_gen']:
+            lengths = [r['length'] for r in results['length_gen']]
+            accuracies = [r['accuracy'] for r in results['length_gen']]
+            color = MODEL_COLORS.get(model_name, 'gray')
+            label = MODEL_LABELS.get(model_name, model_name)
+            ax3.plot(lengths, accuracies, color=color, linewidth=2,
+                    marker='s', markersize=3, label=label, alpha=0.8)
+
+    ax3.set_xlabel('Sequence Length')
+    ax3.set_ylabel('Accuracy (%)')
+    ax3.set_title('Length Generalization')
+    ax3.legend()
+    ax3.grid(True, alpha=0.3)
+    ax3.set_ylim(0, 100)
+
+    # Plot 4: Final Performance Summary
+    model_names = []
+    final_accuracies = []
+    param_counts = []
+
+    for model_name, results in valid_results.items():
+        if 'fixed_accuracy' in results:
+            model_names.append(MODEL_LABELS.get(model_name, model_name))
+            final_accuracies.append(results['fixed_accuracy'])
+            param_counts.append(results.get('param_count', 0))
+
+    if model_names:
+        bars = ax4.bar(range(len(model_names)), final_accuracies,
+                      color=[MODEL_COLORS.get(k, 'gray') for k in valid_results.keys()],
+                      alpha=0.7)
+        ax4.set_xlabel('Models')
+        ax4.set_ylabel('Final Accuracy (%)')
+        ax4.set_title('Final Performance Comparison')
+        ax4.set_xticks(range(len(model_names)))
+        ax4.set_xticklabels(model_names, rotation=45, ha='right')
+        ax4.set_ylim(0, 100)
+        ax4.grid(True, alpha=0.3, axis='y')
+
+        # Add parameter counts as text on bars
+        for i, (bar, params) in enumerate(zip(bars, param_counts)):
+            if params > 0:
+                ax4.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1,
+                        f'{params/1e6:.1f}M', ha='center', va='bottom', fontsize=8)
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"All models comparison plot saved to: {save_path}")

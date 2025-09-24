@@ -1,6 +1,6 @@
 # SSM Experiments (Slim)
 
-A clean, CPU-friendly reproduction of the Transformer vs Mamba comparison on a synthetic copy task. This is a slim, stand-alone layout distilled from exploratory iterations, keeping only what’s needed to run, train, evaluate, and plot.
+A clean, CPU-friendly reproduction of the Transformer vs Mamba comparison on a synthetic copy task, based on the "Repeat After Me" study by Jelassi et al. This is a slim, stand-alone layout distilled from exploratory iterations, keeping only what's needed to run, train, evaluate, and plot.
 
 ## Quickstart
 
@@ -41,5 +41,34 @@ Example:
 - Reproducibility: Configs and parameter counts are saved with results.
 - This slim package intentionally omits unused legacy files and large artifacts. The original exploratory files remain in the repo root but are not needed to run via `ssm_experiments`.
 
+## Citation & Original Work
+
+This repository is a slim reproduction of experiments from:
+
+**"Repeat After Me: Transformers are Better than State Space Models at Copying"**
+*Samy Jelassi, David Brandfonbrener, Sham M. Kakade, Eran Malach*
+
+- **Paper**: [arXiv:2402.01032](https://arxiv.org/abs/2402.01032) (2024)
+- **Original Repository**: [jelassi/repeat-after-me](https://github.com/jelassi/repeat-after-me)
+
+### Key Differences from Original
+- **CPU-friendly implementation**: No CUDA-specific dependencies required
+- **Simplified architecture**: Focused on core comparison without auxiliary experiments
+- **Progressive plotting**: Real-time visualization as models complete training
+- **Enhanced reproducibility**: Complete parameter matching and checkpoint management
+- **Streamlined workflow**: Single command execution with flexible model selection
+
+If you use this reproduction in your research, please cite the original paper:
+
+```bibtex
+@article{jelassi2024repeat,
+  title={Repeat After Me: Transformers are Better than State Space Models at Copying},
+  author={Jelassi, Samy and Brandfonbrener, David and Kakade, Sham M. and Malach, Eran},
+  journal={arXiv preprint arXiv:2402.01032},
+  year={2024}
+}
+```
+
 ## License
-See LICENSE in the original project if you bring in licensed components. This slim package itself has no license header; add one if needed for distribution.
+
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
