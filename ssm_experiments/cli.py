@@ -57,7 +57,7 @@ def main():
     parser.add_argument('--config', type=str, default=None,
                         help='Path to Python config file (.py). If omitted, uses configs.py when present.')
     parser.add_argument('--only', type=str,
-                        choices=['all', 'transformer', 'paper_mamba', 'transformer_rope', 'transformer_nope',
+                        choices=['all', 'transformer', 'paper_mamba', 'minimal_mamba', 'transformer_rope', 'transformer_nope',
                                 'transformer_alibi', 'transformer_hard_alibi'],
                         default='all',
                         help='Select which model(s) to run')
@@ -474,9 +474,75 @@ def main():
     if user_config and isinstance(user_config.get('models'), dict):
         user_models = user_config['models']
         for name, overrides in user_models.items():
-            if name not in configs or not isinstance(overrides, dict):
+            if not isinstance(overrides, dict):
                 continue
-            for key in ('model', 'hidden_size', 'layers', 'heads', 'state_dim', 'dt_min', 'dt_max', 'num_masked_heads', 'min_window_size', 'min_window_divisor', 'dropout_rate'):
+
+            # If model is not in auto-generated configs, create it from configs.py
+            if name not in configs:
+                # For config-only models, estimate parameters based on target budget
+                target = target_params or 5_000_000
+                vocab_size = vocab_for_matching
+
+                # More accurate estimation for model size based on type
+                if name == 'minimal_mamba':
+                    # Use accurate parameter matching for minimal_mamba
+                    from .utils.parameter_matching import find_minimal_mamba_config
+                    state_dim = overrides.get('state_dim', 16)
+                    expand = overrides.get('expand', 2)
+
+                    config_result = find_minimal_mamba_config(
+                        target_params=target,
+                        vocab_size=vocab_size,
+                        state_dim=state_dim,
+                        expand=expand
+                    )
+
+                    if config_result:
+                        hidden_size = config_result['hidden_size']
+                        layers = config_result['layers']
+                        print(f"Matched minimal_mamba: {hidden_size}h x {layers}L = {config_result['estimated_params']:,} params (target: {target:,})")
+                    else:
+                        # Fallback
+                        hidden_size, layers = 384, 6
+                elif name == 'paper_mamba':
+                    # Use accurate parameter matching for paper_mamba
+                    from .utils.parameter_matching import find_paper_mamba_config
+                    state_dim = overrides.get('state_dim', 32)
+
+                    config_result = find_paper_mamba_config(
+                        target_params=target,
+                        vocab_size=vocab_size,
+                        state_dim=state_dim
+                    )
+
+                    if config_result:
+                        hidden_size = config_result['hidden_size']
+                        layers = config_result['layers']
+                        print(f"Matched paper_mamba: {hidden_size}h x {layers}L = {config_result['estimated_params']:,} params (target: {target:,})")
+                    else:
+                        # Fallback
+                        hidden_size, layers = 384, 6
+                elif 'mamba' in name.lower():
+                    # Other Mamba-like models - rough estimate
+                    hidden_size = int((target / (vocab_size * 2 + 12 * 8)) ** 0.5)
+                    hidden_size = max(128, min(1024, hidden_size))
+                    layers = min(12, max(4, target // (hidden_size * hidden_size * 6)))
+                else:
+                    # Transformer-like models
+                    hidden_size = int((target / (vocab_size * 2 + 12 * 8)) ** 0.5)
+                    hidden_size = max(128, min(1024, hidden_size))
+                    layers = min(12, max(4, target // (hidden_size * hidden_size * 12)))
+
+                base_config = {
+                    'model': name,
+                    'hidden_size': hidden_size,
+                    'layers': layers,
+                    'heads': max(4, hidden_size // 64),  # reasonable head count
+                }
+                configs[name] = base_config
+
+            # Apply all overrides
+            for key in ('model', 'hidden_size', 'layers', 'heads', 'state_dim', 'dt_min', 'dt_max', 'expand', 'd_conv', 'num_masked_heads', 'min_window_size', 'min_window_divisor', 'dropout_rate'):
                 if key in overrides:
                     configs[name][key] = overrides[key]
     # Optional filtering to run specific models
@@ -525,6 +591,10 @@ def main():
             args.dt_min = config['dt_min']
         if 'dt_max' in config:
             args.dt_max = config['dt_max']
+        if 'expand' in config:
+            args.expand = config['expand']
+        if 'd_conv' in config:
+            args.d_conv = config['d_conv']
         # Prefer divisor if provided; else support explicit size or 'auto'
         if 'min_window_divisor' in config:
             try:

@@ -3,6 +3,7 @@ from .hard_alibi_model import GPTNeoXHardAlibiForCausalLM
 from .alibi_model import GPTNeoXAlibiForCausalLM
 from .nope import GPTNeoXNoPEForCausalLM
 from .paper_mamba import PaperMambaLMHeadModel
+from .minimal_mamba import MinimalMambaLMHeadModel
 
 
 def get_model(args, tokenizer):
@@ -12,7 +13,8 @@ def get_model(args, tokenizer):
     - "T_rope": GPT-NeoX with RoPE (built-in transformers)
     - "mamba": Transformers Mamba implementation
     - "paper_mamba": Optimized paper-informed CPU Mamba
-    
+    - "minimal_mamba": Reference Mamba implementation from mamba-minimal
+
     """
 
     if args.model in ["T_rope", "T_nope", "T_alibi"]:
@@ -73,6 +75,21 @@ def get_model(args, tokenizer):
             vocab_size=len(tokenizer),
         )
         print("Using paper-informed Mamba (CPU-friendly implementation)")
+
+    elif args.model == "minimal_mamba":
+        model = MinimalMambaLMHeadModel(
+            d_model=args.hidden_size,
+            n_layer=args.layers,
+            ssm_cfg={
+                "d_state": getattr(args, "state_dim", 16),
+                "dt_min": getattr(args, "dt_min", 1e-3),
+                "dt_max": getattr(args, "dt_max", 0.1),
+                "expand": getattr(args, "expand", 2),
+                "d_conv": getattr(args, "d_conv", 4),
+            },
+            vocab_size=len(tokenizer),
+        )
+        print("Using minimal Mamba (reference implementation from mamba-minimal)")
 
     else:
         raise ValueError(f"Unsupported model type: {args.model}")

@@ -23,7 +23,7 @@ EVAL_CONTEXT_LEN = 2 * MAX_EVAL_LEN + 50  # > 2 * MAX_EVAL_LEN
 
 CONFIG = {
     "global": {
-        "target_params": 5_000_000,
+        "target_params": 350_000,
         "steps": 20_000,
         "max_lr": 1e-4,
         "min_lr": 1e-6,
@@ -45,7 +45,8 @@ CONFIG = {
         "transformer_rope": {"heads": 8},
         "transformer_nope": {"heads": 8},
         "transformer_alibi": {"heads": 8},
-        "transformer_hard_alibi": {"heads": 8, "num_masked_heads": 6, "min_window_divisor": 4},
-        "paper_mamba": {"state_dim": 32, "dt_min": 0.001, "dt_max": 0.5},
+        "transformer_hard_alibi": {"heads": 8, "num_masked_heads": 6, "min_window_divisor": 2},
+        "paper_mamba": {"state_dim": 16, "dt_min": 0.001, "dt_max": 0.1},
+        "minimal_mamba": {"state_dim": 16, "dt_min": 0.001, "dt_max": 0.1, "expand": 2, "d_conv": 4},
     },
 }
