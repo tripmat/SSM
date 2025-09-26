@@ -5,9 +5,13 @@ from types import SimpleNamespace
 from .data.datasets import get_eval_dataset
 
 
-def offline_accuracy_evaluation(model, fixed_eval_dataset, args, tokenizer, TO_TOKEN, device='cpu'):
+def offline_accuracy_evaluation(model, fixed_eval_dataset, args, tokenizer, TO_TOKEN, device=None):
+    # Auto-detect device if not specified
+    if device is None:
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Running offline accuracy evaluation on {len(fixed_eval_dataset)} examples (masked answer region)...")
     model.eval()
+    model = model.to(device)  # Ensure model is on correct device
     pad_id = TO_TOKEN['*']
     with torch.inference_mode():
         all_string_accuracies = []
@@ -23,16 +27,17 @@ def offline_accuracy_evaluation(model, fixed_eval_dataset, args, tokenizer, TO_T
             eval_x_masked[:, :-1][eval_mask_x == 1] = pad_id
 
             # Forward pass on masked inputs
-            if args.model == "lstm":
-                eval_state = model.init_hidden(eval_x_masked.size(0), device)
-                eval_logits, _ = model(eval_x_masked, eval_state)
-            elif args.model == "mamba":
-                eval_logits = model(eval_x_masked)[0]
+            # Support transformers-style dict outputs and tuple/list outputs
+            try:
+                out = model(eval_x_masked, use_cache=False)
+            except Exception:
+                out = model(eval_x_masked)
+            if isinstance(out, dict):
+                eval_logits = out.get('logits', out)
+            elif isinstance(out, (list, tuple)):
+                eval_logits = out[0]
             else:
-                try:
-                    eval_logits = model(eval_x_masked, use_cache=False)['logits']
-                except Exception:
-                    eval_logits = model(eval_x_masked)['logits']
+                eval_logits = out
 
             # Predictions for the answer region
             eval_pred = torch.argmax(eval_logits, dim=-1)
@@ -46,7 +51,10 @@ def offline_accuracy_evaluation(model, fixed_eval_dataset, args, tokenizer, TO_T
         return avg_accuracy
 
 
-def evaluate_length_generalization(args, model, tokenizer, TO_TOKEN, device='cpu'):
+def evaluate_length_generalization(args, model, tokenizer, TO_TOKEN, device=None):
+    # Auto-detect device if not specified
+    if device is None:
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
     model.eval()
     model = model.to(device)
     lengths = np.arange(args.min_eval_len, args.max_eval_len)
@@ -86,13 +94,13 @@ def evaluate_length_generalization(args, model, tokenizer, TO_TOKEN, device='cpu
             mask_x = mask_full[:, :-1]
             x_masked[:, :-1][mask_x == 1] = TO_TOKEN['*']
             with torch.no_grad():
-                if args.model == "lstm":
-                    state = model.init_hidden(args.eval_batch_size, device)
-                    logits, state = model(x_masked, state)
-                elif args.model == "mamba":
-                    logits = model(x_masked)[0]
+                out = model(x_masked)
+                if isinstance(out, dict):
+                    logits = out.get('logits', out)
+                elif isinstance(out, (list, tuple)):
+                    logits = out[0]
                 else:
-                    logits = model(x_masked)['logits']
+                    logits = out
                 pred = torch.argmax(logits, dim=-1)
                 for i in range(len(x)):
                     str_acc, char_acc = get_score(args, tokenizer, x, pred, i)

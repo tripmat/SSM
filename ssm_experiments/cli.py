@@ -17,6 +17,7 @@ from .train import train_model
 from .evaluate import offline_accuracy_evaluation, evaluate_length_generalization, generate_fixed_eval_dataset
 from .utils.parameter_matching import get_optimal_configs, count_parameters
 from .utils.plotting import plot_all_models_comparison, plot_single_model_analysis
+from .utils.config_loader import load_config
 
 
 def main():
@@ -54,7 +55,7 @@ def main():
     parser.add_argument('--eval-context-len', type=int, default=450)
     parser.add_argument('--outputs', type=str, default='outputs', help='Outputs root directory')
     parser.add_argument('--config', type=str, default=None,
-                        help='Path to JSON config file to override global and per-model parameters')
+                        help='Path to Python config file (.py). If omitted, uses configs.py when present.')
     parser.add_argument('--only', type=str,
                         choices=['all', 'transformer', 'paper_mamba', 'transformer_rope', 'transformer_nope',
                                 'transformer_alibi', 'transformer_hard_alibi'],
@@ -363,26 +364,33 @@ def main():
             self.context_len = args_cli.context_len
             self.eval_context_len = args_cli.eval_context_len
 
-    # Optional: load user config (JSON) to override globals and per-model params
+    # Optional: load user config (.py) to override globals and per-model params
     user_config = None
+    # Auto-detect default config if not provided
+    if not args_cli.config:
+        default_cfg = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', 'configs.py'))
+        if os.path.exists(default_cfg):
+            args_cli.config = default_cfg
     if args_cli.config:
         cfg_path = os.path.abspath(args_cli.config)
         if not os.path.exists(cfg_path):
             raise SystemExit(f"Config file not found: {cfg_path}")
         try:
-            with open(cfg_path, 'r') as f:
-                user_config = json.load(f)
+            user_config = load_config(cfg_path)
             print(f"Loaded config: {cfg_path}")
-            # Save an exact copy of the provided config into the logs folder for reproducibility
+            # Save snapshots for reproducibility: source file + resolved JSON
             try:
-                dest_name = f"run_{ts}.config.json"
-                dest_path = os.path.join(logs_dir, dest_name)
-                # Avoid copying over itself
+                # Save resolved config as JSON for reproducibility in logs
+                resolved_path = os.path.join(logs_dir, f"run_{ts}.config.resolved.json")
+                with open(resolved_path, 'w') as f:
+                    json.dump(user_config, f, indent=2)
+                # Also copy the Python source file for provenance
+                dest_path = os.path.join(logs_dir, f"run_{ts}.config.py")
                 if os.path.abspath(cfg_path) != os.path.abspath(dest_path):
                     shutil.copy2(cfg_path, dest_path)
-                    print(f"Saved config snapshot to: {dest_path}")
+                print(f"Saved config snapshots to: {resolved_path} and {dest_path}")
             except Exception as e:
-                print(f"Warning: failed to snapshot config file: {e}")
+                print(f"Warning: failed to snapshot config: {e}")
         except Exception as e:
             raise SystemExit(f"Failed to load config {cfg_path}: {e}")
 
@@ -413,8 +421,8 @@ def main():
 
     # Setup experiment config for matching - use the full user_config or create default
     if user_config:
-        experiment_config = user_config.copy()  # Use the loaded JSON config
-        print("Using provided JSON config for compatibility matching")
+        experiment_config = user_config.copy()  # Use the loaded config
+        print("Using provided Python config for compatibility matching")
     else:
         experiment_config = {"note": "no_config_file_provided", "args_cli": vars(args_cli)}
         print("No config file provided - using CLI arguments for compatibility matching")

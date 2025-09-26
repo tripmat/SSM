@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(nvidia-smi:*)",
+      "Bash(pip install:*)",
+      "Bash(where nvcc)",
+      "Bash(curl:*)",
+      "Bash(dir:*)",
+      "Bash(conda:*)",
+      "Bash(where cl)",
+      "Bash(call \"C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat\")",
+      "Read(//c/Users/tripodi/Desktop/transformers_ssm_copy-main/synthetic_exps/**)",
+      "Read(//c/Users/tripodi/Desktop/transformers_ssm_copy-main/**)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

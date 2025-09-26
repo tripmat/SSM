@@ -244,7 +244,7 @@ def get_eval_dataset(args, tokenizer, TO_TOKEN, target_min_len, target_max_len):
         n_gram=args.n_gram,
         length_answer=args.length_answer,
         eval_task=args.eval_task,
-        sequence_length=getattr(args, 'context_len', getattr(args, 'eval_context_len', 220)),
+        sequence_length=getattr(args, 'eval_context_len', getattr(args, 'context_len', 220)),
         min_length=target_min_len,
         max_length=target_max_len,
         batch_size=args.eval_batch_size,

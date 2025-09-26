@@ -37,7 +37,7 @@ Example:
 
 ## Notes
 - Mamba path: This repo uses a paper-informed Mamba implementation (no external `mamba_ssm` dependency). The `mamba` option aliases to the same implementation as `paper_mamba` for consistency and Windows compatibility.
-- Mamba configuration via JSON: you can override per-model parameters in `--config` (see `configs/experiment.example.json`). For Mamba variants, you can set `state_dim`, `dt_min`, and `dt_max`.
+- Mamba configuration via Python: override parameters using a Python config file. By default, the CLI looks for `configs.py` (or pass `--config path/to/file.py`). For Mamba variants, you can set `state_dim`, `dt_min`, and `dt_max`.
 - Reproducibility: Configs and parameter counts are saved with results.
 - This slim package intentionally omits unused legacy files and large artifacts. The original exploratory files remain in the repo root but are not needed to run via `ssm_experiments`.
 

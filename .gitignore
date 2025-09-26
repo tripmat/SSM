@@ -25,3 +25,6 @@ outputs/
 # Jupyter
 .ipynb_checkpoints/
 
+# Windows reserved device filename accidentally created; ignore to avoid add/index errors
+nul
+
