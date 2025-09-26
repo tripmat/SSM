@@ -625,6 +625,19 @@ def main():
         if existing_results is not None:
             results[model_name] = existing_results
             print(f"Using existing results for {model_name}")
+
+            # Still log comprehensive info for existing models
+            model = get_model(args, tokenizer)
+            from .utils.model_logger import log_comprehensive_model_info
+            run_id = datetime.now().strftime("%Y%m%d_%H%M%S") + f"_{model_name}_existing"
+            log_data, log_path = log_comprehensive_model_info(
+                model=model,
+                model_name=model_name,
+                args=args,
+                tokenizer=tokenizer,
+                output_dir=logs_dir,
+                run_id=run_id
+            )
             continue
 
         print(f"Training {model_name.upper()}...")
@@ -636,7 +649,18 @@ def main():
 
         model = get_model(args, tokenizer)
         param_count = count_parameters(model)
-        print(f"Model parameters: {param_count:,}")
+
+        # Comprehensive model logging
+        from .utils.model_logger import log_comprehensive_model_info
+        run_id = datetime.now().strftime("%Y%m%d_%H%M%S") + f"_{model_name}"
+        log_data, log_path = log_comprehensive_model_info(
+            model=model,
+            model_name=model_name,
+            args=args,
+            tokenizer=tokenizer,
+            output_dir=logs_dir,
+            run_id=run_id
+        )
 
         # Train dataset
         train_dataset = CopyDataset(

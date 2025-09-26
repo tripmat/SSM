@@ -221,9 +221,19 @@ def find_matched_configs(
     best_configs = {}
     best_key = (float('inf'), float('inf'))  # (target_error, pair_diff)
 
-    hs_list = hidden_sizes or [256, 288, 320, 352, 384, 416, 448, 480, 512, 576]
-    t_layers_list = transformer_layers or [4, 6, 8, 10, 12]
-    m_layers_list = mamba_layers or [8, 12, 16, 20, 24, 28]
+    # Adjust search ranges based on target parameter size
+    if target_params < 1_000_000:  # Small models (< 1M params)
+        hs_list = hidden_sizes or [64, 96, 128, 160, 192, 224, 256]
+        t_layers_list = transformer_layers or [2, 3, 4, 6, 8]
+        m_layers_list = mamba_layers or [2, 3, 4, 6, 8, 12]
+    elif target_params < 10_000_000:  # Medium models (1-10M params)
+        hs_list = hidden_sizes or [192, 224, 256, 288, 320, 352, 384, 416]
+        t_layers_list = transformer_layers or [4, 6, 8, 10, 12]
+        m_layers_list = mamba_layers or [8, 12, 16, 20, 24]
+    else:  # Large models (>10M params)
+        hs_list = hidden_sizes or [256, 288, 320, 352, 384, 416, 448, 480, 512, 576]
+        t_layers_list = transformer_layers or [4, 6, 8, 10, 12]
+        m_layers_list = mamba_layers or [8, 12, 16, 20, 24, 28]
     sd_list = [mamba_state_dim] if mamba_state_dim is not None else [16, 24, 32, 48]
 
     for hidden_size in hs_list:

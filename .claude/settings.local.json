@@ -11,7 +11,8 @@
       "Bash(where cl)",
       "Bash(call \"C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat\")",
       "Read(//c/Users/tripodi/Desktop/transformers_ssm_copy-main/synthetic_exps/**)",
-      "Read(//c/Users/tripodi/Desktop/transformers_ssm_copy-main/**)"
+      "Read(//c/Users/tripodi/Desktop/transformers_ssm_copy-main/**)",
+      "Read(//c/Users/tripodi/Desktop/mamba-minimal-master/**)"
     ],
     "deny": [],
     "ask": []
