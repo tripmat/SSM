@@ -45,7 +45,7 @@ CONFIG = {
         "transformer_rope": {"heads": 8},
         "transformer_nope": {"heads": 8},
         "transformer_alibi": {"heads": 8},
-        "transformer_hard_alibi": {"heads": 8, "num_masked_heads": 6, "min_window_divisor": 2},
+        "transformer_hard_alibi": {"heads": 8, "num_masked_heads": 6},
         "paper_mamba": {"state_dim": 16, "dt_min": 0.001, "dt_max": 0.1},
         "minimal_mamba": {"state_dim": 16, "dt_min": 0.001, "dt_max": 0.1, "expand": 2, "d_conv": 4},
     },

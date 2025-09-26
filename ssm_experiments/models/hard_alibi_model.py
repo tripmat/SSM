@@ -99,7 +99,6 @@ class GPTHardAlibiAttention(nn.Module):
         self.attention_dropout = nn.Dropout(config.attention_dropout)
         # Hard-ALiBi controls
         self.num_masked_heads = int(getattr(config, 'num_masked_heads', 0) or 0)
-        self.min_window_size = int(getattr(config, 'min_window_size', 100))
 
     def _init_bias(self, max_positions, device=None):
         self.register_buffer(

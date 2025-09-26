@@ -542,7 +542,7 @@ def main():
                 configs[name] = base_config
 
             # Apply all overrides
-            for key in ('model', 'hidden_size', 'layers', 'heads', 'state_dim', 'dt_min', 'dt_max', 'expand', 'd_conv', 'num_masked_heads', 'min_window_size', 'min_window_divisor', 'dropout_rate'):
+            for key in ('model', 'hidden_size', 'layers', 'heads', 'state_dim', 'dt_min', 'dt_max', 'expand', 'd_conv', 'num_masked_heads', 'dropout_rate'):
                 if key in overrides:
                     configs[name][key] = overrides[key]
     # Optional filtering to run specific models
@@ -595,28 +595,6 @@ def main():
             args.expand = config['expand']
         if 'd_conv' in config:
             args.d_conv = config['d_conv']
-        # Prefer divisor if provided; else support explicit size or 'auto'
-        if 'min_window_divisor' in config:
-            try:
-                div = int(config['min_window_divisor'])
-                if div <= 0:
-                    raise ValueError('divisor must be > 0')
-                args.min_window_size = max(1, int(args.max_train_len) // div)
-                print(f"Resolved min_window_size via divisor {div} -> {args.min_window_size} (max_train_len={args.max_train_len})")
-            except Exception as e:
-                print(f"Warning: invalid min_window_divisor={config.get('min_window_divisor')}: {e}; using default rule //5")
-                args.min_window_size = max(1, int(args.max_train_len) // 5)
-        elif 'min_window_size' in config:
-            val = config['min_window_size']
-            if isinstance(val, str) and val.lower() == 'auto':
-                args.min_window_size = max(1, int(args.max_train_len) // 5)
-                print(f"Resolved min_window_size=auto -> {args.min_window_size} (from max_train_len={args.max_train_len})")
-            else:
-                try:
-                    args.min_window_size = int(val)
-                except Exception:
-                    print(f"Warning: invalid min_window_size={val}; falling back to default 100")
-                    args.min_window_size = 100
         if 'dropout_rate' in config:
             args.dropout_rate = config['dropout_rate']
 
