@@ -98,15 +98,21 @@ def main():
     except Exception as e:
         print(f"Warning: failed to set reproducible seeds: {e}")
 
-    # Set up run log: tee stdout/stderr to outputs/logs/run_YYYYmmdd_HHMMSS.log
+    # Set up timestamped experiment directory and logging
     outputs_dir = os.path.abspath(args_cli.outputs)
     if os.path.islink(outputs_dir):
         raise ValueError(f"Refusing to write to symlinked outputs directory: {outputs_dir}")
     os.makedirs(outputs_dir, exist_ok=True)
-    logs_dir = os.path.join(outputs_dir, 'logs')
-    os.makedirs(logs_dir, exist_ok=True)
+
+    # Create timestamped experiment folder
     ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+    experiment_dir = os.path.join(outputs_dir, f'experiment_{ts}')
+    logs_dir = os.path.join(experiment_dir, 'logs')
+    os.makedirs(experiment_dir, exist_ok=True)
+    os.makedirs(logs_dir, exist_ok=True)
+
     log_path = os.path.join(logs_dir, f'run_{ts}.log')
+    print(f"Created experiment directory: {experiment_dir}")
 
     class Tee(io.TextIOBase):
         def __init__(self, *streams):
@@ -378,19 +384,7 @@ def main():
         try:
             user_config = load_config(cfg_path)
             print(f"Loaded config: {cfg_path}")
-            # Save snapshots for reproducibility: source file + resolved JSON
-            try:
-                # Save resolved config as JSON for reproducibility in logs
-                resolved_path = os.path.join(logs_dir, f"run_{ts}.config.resolved.json")
-                with open(resolved_path, 'w') as f:
-                    json.dump(user_config, f, indent=2)
-                # Also copy the Python source file for provenance
-                dest_path = os.path.join(logs_dir, f"run_{ts}.config.py")
-                if os.path.abspath(cfg_path) != os.path.abspath(dest_path):
-                    shutil.copy2(cfg_path, dest_path)
-                print(f"Saved config snapshots to: {resolved_path} and {dest_path}")
-            except Exception as e:
-                print(f"Warning: failed to snapshot config: {e}")
+            # Config snapshots will be saved later to experiment directory
         except Exception as e:
             raise SystemExit(f"Failed to load config {cfg_path}: {e}")
 
@@ -413,11 +407,32 @@ def main():
         return argobj
 
     # Setup outputs directories early (needed for config matching)
-    outputs_dir = os.path.abspath(args_cli.outputs)
     checkpoints_dir = os.path.join(outputs_dir, 'checkpoints')
-    figures_dir = os.path.join(outputs_dir, 'figures')
+    figures_dir = os.path.join(experiment_dir, 'figures')
+
     os.makedirs(checkpoints_dir, exist_ok=True)
     os.makedirs(figures_dir, exist_ok=True)
+
+    # Copy config file to experiment directory
+    if user_config and hasattr(args_cli, 'config') and args_cli.config:
+        import shutil
+        config_backup_path = os.path.join(experiment_dir, 'config_used.py')
+        try:
+            shutil.copy2(args_cli.config, config_backup_path)
+            print(f"Config backup saved: {config_backup_path}")
+        except Exception as e:
+            print(f"Warning: Could not backup config file: {e}")
+
+    # Always save the resolved config as JSON for reproducibility
+    if user_config:
+        try:
+            import json
+            config_json_path = os.path.join(experiment_dir, 'config_resolved.json')
+            with open(config_json_path, 'w') as f:
+                json.dump(user_config, f, indent=2)
+            print(f"Resolved config saved: {config_json_path}")
+        except Exception as e:
+            print(f"Warning: Could not save resolved config: {e}")
 
     # Setup experiment config for matching - use the full user_config or create default
     if user_config:
@@ -427,8 +442,8 @@ def main():
         experiment_config = {"note": "no_config_file_provided", "args_cli": vars(args_cli)}
         print("No config file provided - using CLI arguments for compatibility matching")
 
-    # Load existing compatible results (if any)
-    results, _ = load_compatible_results(figures_dir, experiment_config)
+    # Start fresh for each experiment (no more caching between runs)
+    results = {}
 
     # If user provided target params and/or constraints, pass them through to matching
     target_params = None
@@ -797,8 +812,7 @@ def main():
         single_model_path = os.path.join(figures_dir, f'{model_name}_detailed_analysis.png')
         plot_single_model_analysis(model_name, results_obj, checkpoints_dir, args, tokenizer, TO_TOKEN, device, single_model_path)
 
-        # Save updated results cache for future runs
-        save_experiment_results(figures_dir, results, experiment_config)
+        # Results will be saved at the end to experiment directory
 
     # Final experiment summary
     print(f"\n{'='*60}")
@@ -807,8 +821,8 @@ def main():
     print(f"Models trained: {len(results)}")
     print(f"Final comparison plot: {os.path.join(figures_dir, 'all_models_comparison.png')}")
 
-    # Save final detailed results
-    results_file = os.path.join(outputs_dir, "experiment_results.json")
+    # Save final detailed results to experiment directory
+    results_file = os.path.join(experiment_dir, "experiment_results.json")
     with open(results_file, 'w') as f:
         serializable_results = {}
         for name, r in results.items():
