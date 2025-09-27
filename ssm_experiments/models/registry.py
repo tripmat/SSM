@@ -11,7 +11,6 @@ def get_model(args, tokenizer):
 
     Supported models in the slim package:
     - "T_rope": GPT-NeoX with RoPE (built-in transformers)
-    - "mamba": Transformers Mamba implementation
     - "paper_mamba": Optimized paper-informed CPU Mamba
     - "minimal_mamba": Reference Mamba implementation from mamba-minimal
 
@@ -48,20 +47,6 @@ def get_model(args, tokenizer):
         model = GPTNeoXAlibiForCausalLM(config)
     elif args.model == "T_hard_alibi":
         model = GPTNeoXHardAlibiForCausalLM(config)
-
-    elif args.model == "mamba":
-        # Alias to paper-informed implementation (no optimized variant)
-        model = PaperMambaLMHeadModel(
-            d_model=args.hidden_size,
-            n_layer=args.layers,
-            ssm_cfg={
-                "d_state": getattr(args, "state_dim", 16),
-                "dt_min": getattr(args, "dt_min", 1e-3),
-                "dt_max": getattr(args, "dt_max", 0.2),
-            },
-            vocab_size=len(tokenizer),
-        )
-        print("Using paper-informed Mamba (alias for 'mamba')")
 
     elif args.model == "paper_mamba":
         model = PaperMambaLMHeadModel(

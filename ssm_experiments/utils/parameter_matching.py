@@ -263,12 +263,12 @@ def find_matched_configs(
                                     'estimated_params': est_params,
                                     'model': 'T_rope',
                                 },
-                                'mamba': {
+                                'paper_mamba': {
                                     'hidden_size': hidden_size,
                                     'layers': mamba_layers,
                                     'state_dim': state_dim,
                                     'estimated_params': m_params,
-                                    'model': 'mamba',
+                                    'model': 'paper_mamba',
                                 },
                                 'param_difference': pair_diff,
                                 'param_ratio': m_params / est_params,
@@ -302,14 +302,14 @@ def verify_actual_parameters(configs, vocab_size=30):
     transformer_params = count_parameters(transformer_model)
     results['transformer'] = {'config': t_cfg, 'actual_params': transformer_params}
 
-    m_cfg = configs['mamba']
-    args.model = 'mamba'
+    m_cfg = configs['paper_mamba']
+    args.model = 'paper_mamba'
     args.hidden_size = m_cfg['hidden_size']
     args.layers = m_cfg['layers']
     args.state_dim = m_cfg['state_dim']
     mamba_model = get_model(args, tokenizer)
     mamba_params = count_parameters(mamba_model)
-    results['mamba'] = {'config': m_cfg, 'actual_params': mamba_params}
+    results['paper_mamba'] = {'config': m_cfg, 'actual_params': mamba_params}
 
     results['comparison'] = {
         'param_difference': abs(transformer_params - mamba_params),
@@ -376,13 +376,13 @@ def get_optimal_configs(
             'num_masked_heads': hard_num_masked_heads,
             'actual_params': verification['transformer']['actual_params'],
         },
-        'mamba': {
-            'model': 'mamba',
-            'hidden_size': matched['mamba']['hidden_size'],
-            'layers': matched['mamba']['layers'],
-            'heads': max(4, matched['mamba']['hidden_size'] // 64),
-            'state_dim': matched['mamba']['state_dim'],
-            'actual_params': verification['mamba']['actual_params'],
+        'paper_mamba': {
+            'model': 'paper_mamba',
+            'hidden_size': matched['paper_mamba']['hidden_size'],
+            'layers': matched['paper_mamba']['layers'],
+            'heads': max(4, matched['paper_mamba']['hidden_size'] // 64),
+            'state_dim': matched['paper_mamba']['state_dim'],
+            'actual_params': verification['paper_mamba']['actual_params'],
         },
     }
     return final

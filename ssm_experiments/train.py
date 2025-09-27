@@ -81,7 +81,7 @@ def train_model(args, model, train_dataset, TO_TOKEN, tokenizer, device=None, ch
                 'hard_alibi': 'Hard-ALiBi',
             }
             pretty_name = mapping.get(suffix, suffix.title())
-        elif model_name in ('mamba', 'paper_mamba'):
+        elif model_name == 'paper_mamba':
             pretty_name = 'Paper-Mamba'
         elif model_name == 'minimal_mamba':
             pretty_name = 'Minimal-Mamba'

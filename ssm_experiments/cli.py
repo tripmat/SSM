@@ -447,12 +447,9 @@ def main():
         if isinstance(tha, dict) and 'num_masked_heads' in tha:
             hard_num_masked_heads = tha['num_masked_heads']
         pm = mcfg.get('paper_mamba') or {}
-        m = mcfg.get('mamba') or {}
-        # Prefer explicit paper_mamba state_dim, else mamba
+        # Use paper_mamba state_dim if available
         if isinstance(pm, dict) and 'state_dim' in pm:
             mamba_state_dim = pm['state_dim']
-        elif isinstance(m, dict) and 'state_dim' in m:
-            mamba_state_dim = m['state_dim']
 
     # Determine vocab_size for matching (prefer config override if any)
     vocab_for_matching = None

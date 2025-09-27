@@ -16,7 +16,8 @@ MODEL_COLORS = {
     'transformer_nope': '#ff7f0e',
     'transformer_alibi': '#2ca02c',
     'transformer_hard_alibi': '#d62728',
-    'mamba': '#9467bd',
+    'paper_mamba': '#9467bd',
+    'minimal_mamba': '#8c564b',
 }
 
 MODEL_LABELS = {
@@ -24,7 +25,8 @@ MODEL_LABELS = {
     'transformer_nope': 'Transformer: No PE',
     'transformer_alibi': 'Transformer: ALiBi',
     'transformer_hard_alibi': 'Transformer: Hard ALiBi',
-    'mamba': 'GSSM: Mamba',
+    'paper_mamba': 'Paper-Mamba',
+    'minimal_mamba': 'Minimal-Mamba',
 }
 
 
@@ -44,7 +46,7 @@ def plot_paper_reproduction(transformer_results, mamba_results, save_path="paper
                  marker='o', markersize=4, label='Transformer: RoPE')
     if m_acc_examples and m_accuracies:
         ax1.plot(m_acc_examples, m_accuracies, color=mamba_color, linewidth=2.5,
-                 marker='s', markersize=4, label='GSSM: Mamba')
+                 marker='s', markersize=4, label='Mamba')
 
     ax1.set_xlabel('Number of training examples')
     ax1.set_ylabel('Accuracy (%)')
@@ -71,7 +73,7 @@ def plot_paper_reproduction(transformer_results, mamba_results, save_path="paper
     ax2.plot(t_lengths, t_accs, color=transformer_color, linewidth=2.5,
              marker='o', markersize=4, label='Transformer: RoPE')
     ax2.plot(m_lengths, m_accs, color=mamba_color, linewidth=2.5,
-             marker='s', markersize=4, label='GSSM: Mamba')
+             marker='s', markersize=4, label='Mamba')
 
     ax2.set_xlabel('Number of characters in string')
     ax2.set_ylabel('Accuracy (%)')
