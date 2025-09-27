@@ -46,7 +46,7 @@ CONFIG = {
         "transformer_nope": {"heads": 4},
         "transformer_alibi": {"heads": 4},
         "transformer_hard_alibi": {"heads": 4, "num_masked_heads": 2},
-        "paper_mamba": {"state_dim": 16, "dt_min": 0.001, "dt_max": 0.1},
-        "minimal_mamba": {"state_dim": 16, "dt_min": 0.001, "dt_max": 0.1, "expand": 2, "d_conv": 4},
+        "paper_mamba": {"layers": 6, "state_dim": 12, "dt_min": 0.001, "dt_max": 0.1},
+        "minimal_mamba": {"layers": 6, "state_dim": 16, "dt_min": 0.001, "dt_max": 0.1, "expand": 2, "d_conv": 4},
     },
 }
