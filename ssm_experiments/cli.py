@@ -482,43 +482,85 @@ def main():
 
                 # More accurate estimation for model size based on type
                 if name == 'minimal_mamba':
-                    # Use accurate parameter matching for minimal_mamba
-                    from .utils.parameter_matching import find_minimal_mamba_config
                     state_dim = overrides.get('state_dim', 16)
                     expand = overrides.get('expand', 2)
 
-                    config_result = find_minimal_mamba_config(
-                        target_params=target,
-                        vocab_size=vocab_size,
-                        state_dim=state_dim,
-                        expand=expand
-                    )
+                    # Check if layers is fixed in config
+                    if 'layers' in overrides:
+                        # Fixed layers: find optimal hidden_size
+                        from .utils.parameter_matching import estimate_minimal_mamba_params
+                        layers = overrides['layers']
+                        best_hidden = None
+                        best_diff = float('inf')
 
-                    if config_result:
-                        hidden_size = config_result['hidden_size']
-                        layers = config_result['layers']
-                        print(f"Matched minimal_mamba: {hidden_size}h x {layers}L = {config_result['estimated_params']:,} params (target: {target:,})")
+                        for hidden in range(60, 200):
+                            params = estimate_minimal_mamba_params(hidden, layers, state_dim, vocab_size, expand)
+                            diff = abs(params - target)
+                            if diff < best_diff and params <= target * 1.05:
+                                best_hidden = hidden
+                                best_diff = diff
+                                best_params = params
+
+                        if best_hidden:
+                            hidden_size = best_hidden
+                            print(f"Matched minimal_mamba: {hidden_size}h x {layers}L = {best_params:,} params (target: {target:,})")
+                        else:
+                            hidden_size, layers = 160, 6
                     else:
-                        # Fallback
-                        hidden_size, layers = 384, 6
+                        # Use parameter matching for both hidden_size and layers
+                        from .utils.parameter_matching import find_minimal_mamba_config
+                        config_result = find_minimal_mamba_config(
+                            target_params=target,
+                            vocab_size=vocab_size,
+                            state_dim=state_dim,
+                            expand=expand
+                        )
+
+                        if config_result:
+                            hidden_size = config_result['hidden_size']
+                            layers = config_result['layers']
+                            print(f"Matched minimal_mamba: {hidden_size}h x {layers}L = {config_result['estimated_params']:,} params (target: {target:,})")
+                        else:
+                            hidden_size, layers = 384, 6
                 elif name == 'paper_mamba':
-                    # Use accurate parameter matching for paper_mamba
-                    from .utils.parameter_matching import find_paper_mamba_config
                     state_dim = overrides.get('state_dim', 32)
 
-                    config_result = find_paper_mamba_config(
-                        target_params=target,
-                        vocab_size=vocab_size,
-                        state_dim=state_dim
-                    )
+                    # Check if layers is fixed in config
+                    if 'layers' in overrides:
+                        # Fixed layers: find optimal hidden_size
+                        from .utils.parameter_matching import estimate_paper_mamba_params
+                        layers = overrides['layers']
+                        best_hidden = None
+                        best_diff = float('inf')
 
-                    if config_result:
-                        hidden_size = config_result['hidden_size']
-                        layers = config_result['layers']
-                        print(f"Matched paper_mamba: {hidden_size}h x {layers}L = {config_result['estimated_params']:,} params (target: {target:,})")
+                        for hidden in range(80, 160):
+                            params = estimate_paper_mamba_params(hidden, layers, state_dim, vocab_size)
+                            diff = abs(params - target)
+                            if diff < best_diff and params <= target * 1.05:
+                                best_hidden = hidden
+                                best_diff = diff
+                                best_params = params
+
+                        if best_hidden:
+                            hidden_size = best_hidden
+                            print(f"Matched paper_mamba: {hidden_size}h x {layers}L = {best_params:,} params (target: {target:,})")
+                        else:
+                            hidden_size, layers = 160, 6
                     else:
-                        # Fallback
-                        hidden_size, layers = 384, 6
+                        # Use parameter matching for both hidden_size and layers
+                        from .utils.parameter_matching import find_paper_mamba_config
+                        config_result = find_paper_mamba_config(
+                            target_params=target,
+                            vocab_size=vocab_size,
+                            state_dim=state_dim
+                        )
+
+                        if config_result:
+                            hidden_size = config_result['hidden_size']
+                            layers = config_result['layers']
+                            print(f"Matched paper_mamba: {hidden_size}h x {layers}L = {config_result['estimated_params']:,} params (target: {target:,})")
+                        else:
+                            hidden_size, layers = 384, 6
                 elif 'mamba' in name.lower():
                     # Other Mamba-like models - rough estimate
                     hidden_size = int((target / (vocab_size * 2 + 12 * 8)) ** 0.5)
