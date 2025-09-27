@@ -28,6 +28,8 @@ class MinimalMambaArgs:
     pad_vocab_size_multiple: int = 8
     conv_bias: bool = True
     bias: bool = False
+    dt_min: float = 0.001
+    dt_max: float = 0.1
 
     def __post_init__(self):
         self.d_inner = int(self.expand * self.d_model)
@@ -167,6 +169,7 @@ class MambaBlock(nn.Module):
 
         (delta, B, C) = x_dbl.split(split_size=[self.args.dt_rank, n, n], dim=-1)
         delta = F.softplus(self.dt_proj(delta))  # (b, l, d_in)
+        delta = delta.clamp(min=self.args.dt_min, max=self.args.dt_max)
 
         y = self.selective_scan(x, delta, A, B, C, D)
 
@@ -238,7 +241,7 @@ class MinimalMambaLMHeadModel(nn.Module):
         expand = (ssm_cfg or {}).get("expand", 2)
         d_conv = (ssm_cfg or {}).get("d_conv", 4)
 
-        print(f"Using minimal Mamba with d_state={d_state}, expand={expand}")
+        print(f"Using minimal Mamba with d_state={d_state}, expand={expand}, dt_range=[{dt_min}, {dt_max}]")
 
         # Create MinimalMambaArgs
         args = MinimalMambaArgs(
@@ -248,6 +251,8 @@ class MinimalMambaLMHeadModel(nn.Module):
             d_state=d_state,
             expand=expand,
             d_conv=d_conv,
+            dt_min=dt_min,
+            dt_max=dt_max,
         )
 
         # Create the actual Mamba model

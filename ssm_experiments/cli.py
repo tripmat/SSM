@@ -169,18 +169,23 @@ def main():
 
         for checkpoint_file in checkpoint_files:
             step = extract_step(checkpoint_file)
-            print(f"Evaluating checkpoint at step {step}...")
 
             try:
-                # Create fresh model instance
-                eval_model = get_model(args, tokenizer)
+                # Create fresh model instance (suppress verbose output)
+                import sys
+                import io
+                old_stdout = sys.stdout
+                sys.stdout = io.StringIO()  # Suppress get_model() prints
+                try:
+                    eval_model = get_model(args, tokenizer)
+                finally:
+                    sys.stdout = old_stdout
 
                 # Load checkpoint weights
                 try:
                     checkpoint = torch.load(checkpoint_file, map_location='cpu', weights_only=True)
                 except (TypeError, RuntimeError, pickle.UnpicklingError) as e:
                     # Fallback for comprehensive checkpoints containing RNG states
-                    print(f"  Note: Loading with weights_only=False due to RNG states in checkpoint")
                     checkpoint = torch.load(checkpoint_file, map_location='cpu', weights_only=False)
 
                 if not isinstance(checkpoint, dict):
@@ -211,13 +216,19 @@ def main():
                 eval_model = eval_model.to(device)
                 eval_model.eval()
 
-                # Evaluate accuracy
-                with torch.no_grad():
-                    accuracy = offline_accuracy_evaluation(eval_model, fixed_eval_dataset, args, tokenizer, TO_TOKEN, device=device)
-                    accuracies.append(accuracy)
-                    # Convert step to training examples (step is 1-indexed, but step * batch_size gives examples after that step)
-                    accuracy_training_examples.append((step - 1) * args.train_batch_size)
-                    print(f"Step {step}: Accuracy = {accuracy:.1f}%")
+                # Evaluate accuracy (suppress verbose output)
+                old_stdout = sys.stdout
+                sys.stdout = io.StringIO()  # Suppress evaluation prints
+                try:
+                    with torch.no_grad():
+                        accuracy = offline_accuracy_evaluation(eval_model, fixed_eval_dataset, args, tokenizer, TO_TOKEN, device=device)
+                finally:
+                    sys.stdout = old_stdout
+
+                accuracies.append(accuracy)
+                # Convert step to training examples (step is 1-indexed, but step * batch_size gives examples after that step)
+                accuracy_training_examples.append((step - 1) * args.train_batch_size)
+                print(f"Evaluating {model_name}: Checkpoint at step {step}, Accuracy = {accuracy:.1f}%")
 
             except Exception as e:
                 print(f"Warning: Failed to evaluate checkpoint at step {step}: {e}")
