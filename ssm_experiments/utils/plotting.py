@@ -16,6 +16,7 @@ MODEL_COLORS = {
     'transformer_nope': '#ff7f0e',
     'transformer_alibi': '#2ca02c',
     'transformer_hard_alibi': '#d62728',
+    'transformer_hard_alibi_rope': '#e377c2',
     'paper_mamba': '#9467bd',
     'minimal_mamba': '#8c564b',
 }
@@ -25,6 +26,7 @@ MODEL_LABELS = {
     'transformer_nope': 'Transformer: No PE',
     'transformer_alibi': 'Transformer: ALiBi',
     'transformer_hard_alibi': 'Transformer: Hard ALiBi',
+    'transformer_hard_alibi_rope': 'Transformer: Hard ALiBi + RoPE',
     'paper_mamba': 'Paper-Mamba',
     'minimal_mamba': 'Minimal-Mamba',
 }

@@ -58,7 +58,7 @@ def main():
                         help='Path to Python config file (.py). If omitted, uses configs.py when present.')
     parser.add_argument('--only', type=str,
                         choices=['all', 'transformer', 'paper_mamba', 'minimal_mamba', 'transformer_rope', 'transformer_nope',
-                                'transformer_alibi', 'transformer_hard_alibi'],
+                                'transformer_alibi', 'transformer_hard_alibi', 'transformer_hard_alibi_rope'],
                         default='all',
                         help='Select which model(s) to run')
     parser.add_argument('--device', type=str, default='auto', choices=['auto', 'cpu', 'cuda'],
@@ -139,7 +139,13 @@ def main():
             pass
 
     def evaluate_checkpoints_during_training(model_name, args, checkpoints_dir, tokenizer, TO_TOKEN, fixed_eval_dataset, device):
-        """Evaluate all saved checkpoints to reconstruct training-time accuracy curve"""
+        """Evaluate all saved checkpoints to reconstruct training-time accuracy curve.
+
+        Uses multi-repeat evaluation methodology matching the paper:
+        - Multiple random batches per checkpoint (like paper's "10 batches")
+        - Computes mean ± std across repeats for statistical robustness
+        - Generates fresh examples each repeat to match paper's methodology
+        """
         import glob
 
         # Find all checkpoint files for this model
@@ -148,7 +154,7 @@ def main():
 
         if not checkpoint_files:
             print(f"No checkpoints found for {model_name}")
-            return [], []
+            return [], [], [], []
 
         # Sort by step number
         def extract_step(filepath):
@@ -162,12 +168,17 @@ def main():
 
         checkpoint_files.sort(key=extract_step)
 
-        accuracies = []
+        # Paper's methodology: 10 repeats per checkpoint
+        repeats = 10
+        examples_per_repeat = 100  # Like paper's batch size of 64-128
+
+        mean_accuracies = []
+        std_accuracies = []
         accuracy_training_examples = []
 
-        print(f"Evaluating {len(checkpoint_files)} checkpoints for {model_name}...")
+        print(f"Evaluating {len(checkpoint_files)} checkpoints for {model_name} using {repeats} repeats of {examples_per_repeat} examples each...")
 
-        for checkpoint_file in checkpoint_files:
+        for checkpoint_idx, checkpoint_file in enumerate(checkpoint_files, 1):
             step = extract_step(checkpoint_file)
 
             try:
@@ -193,21 +204,7 @@ def main():
 
                 # Handle both old format (direct state_dict) and new format (comprehensive checkpoint)
                 if 'model_state_dict' in checkpoint:
-                    # New comprehensive format
                     model_state_dict = checkpoint['model_state_dict']
-
-                    # Restore RNG states for deterministic evaluation
-                    if 'torch_rng_state' in checkpoint:
-                        torch.set_rng_state(checkpoint['torch_rng_state'])
-                    if 'numpy_rng_state' in checkpoint:
-                        np.random.set_state(checkpoint['numpy_rng_state'])
-                    if 'random_rng_state' in checkpoint:
-                        random.setstate(checkpoint['random_rng_state'])
-                    if device == 'cuda':
-                        if 'cuda_rng_state' in checkpoint:
-                            torch.cuda.set_rng_state(checkpoint['cuda_rng_state'])
-                        if 'cuda_rng_state_all' in checkpoint:
-                            torch.cuda.set_rng_state_all(checkpoint['cuda_rng_state_all'])
                 else:
                     # Old format (direct state_dict) for backward compatibility
                     model_state_dict = checkpoint
@@ -216,26 +213,65 @@ def main():
                 eval_model = eval_model.to(device)
                 eval_model.eval()
 
-                # Evaluate accuracy (suppress verbose output)
-                old_stdout = sys.stdout
-                sys.stdout = io.StringIO()  # Suppress evaluation prints
-                try:
-                    with torch.no_grad():
-                        accuracy = offline_accuracy_evaluation(eval_model, fixed_eval_dataset, args, tokenizer, TO_TOKEN, device=device)
-                finally:
-                    sys.stdout = old_stdout
+                # Multi-repeat evaluation following paper's methodology
+                scores = []
 
-                accuracies.append(accuracy)
+                for repeat in range(1, repeats + 1):
+                    # Print progress for long evaluations
+                    print(f"\r[Checkpoint {checkpoint_idx}/{len(checkpoint_files)}] Step {step} | Repeat {repeat}/{repeats}", end='', flush=True)
+
+                    # Generate fresh evaluation dataset for this repeat (like paper's approach)
+                    eval_dataset = generate_fixed_eval_dataset(args, tokenizer, TO_TOKEN, num_examples=examples_per_repeat, verbose=False)
+
+                    # Evaluate on this batch
+                    try:
+                        with torch.no_grad():
+                            accuracy = offline_accuracy_evaluation(
+                                eval_model, eval_dataset, args, tokenizer, TO_TOKEN,
+                                device=device, batch_size=getattr(args, 'eval_batch_size', 4), log_interval=0
+                            )
+                        scores.append(float(accuracy))
+                    except RuntimeError as e:
+                        # Handle OOM by reducing batch size
+                        if 'out of memory' in str(e).lower():
+                            eval_batch_size = max(1, getattr(args, 'eval_batch_size', 4) // 2)
+                            try:
+                                with torch.no_grad():
+                                    accuracy = offline_accuracy_evaluation(
+                                        eval_model, eval_dataset, args, tokenizer, TO_TOKEN,
+                                        device=device, batch_size=eval_batch_size, log_interval=0
+                                    )
+                                scores.append(float(accuracy))
+                            except RuntimeError:
+                                # If still OOM, skip this repeat
+                                print(f" [OOM skip]", end='')
+                                continue
+                        else:
+                            raise
+
+                # Compute statistics across repeats
+                if scores:
+                    mean_accuracy = float(np.mean(scores))
+                    std_accuracy = float(np.std(scores))
+                else:
+                    mean_accuracy = 0.0
+                    std_accuracy = 0.0
+
+                mean_accuracies.append(mean_accuracy)
+                std_accuracies.append(std_accuracy)
                 # Convert step to training examples (step is 1-indexed, but step * batch_size gives examples after that step)
                 accuracy_training_examples.append((step - 1) * args.train_batch_size)
-                print(f"Evaluating {model_name}: Checkpoint at step {step}, Accuracy = {accuracy:.1f}%")
+
+                # Clear line and print final result
+                print(f"\r[Checkpoint {checkpoint_idx}/{len(checkpoint_files)}] Step {step}: {mean_accuracy:.1f}% ± {std_accuracy:.1f}% (over {len(scores)} repeats)")
 
             except Exception as e:
                 print(f"Warning: Failed to evaluate checkpoint at step {step}: {e}")
-                accuracies.append(0.0)
+                mean_accuracies.append(0.0)
+                std_accuracies.append(0.0)
                 accuracy_training_examples.append((step - 1) * args.train_batch_size)
 
-        return accuracies, accuracy_training_examples
+        return mean_accuracies, std_accuracies, accuracy_training_examples
 
     def load_compatible_results(figures_dir, current_config):
         """Load existing results that have compatible experiment configuration"""
@@ -281,6 +317,7 @@ def main():
                         'training_examples': r['training']['training_examples'],
                         'training_time': r['training']['training_time'],
                         'accuracies': r['training']['accuracies'],
+                        'accuracy_std': r['training'].get('accuracy_std', []),
                         'accuracy_training_examples': r['training']['accuracy_training_examples'],
                     },
                     'fixed_accuracy': r['fixed_accuracy'],
@@ -472,6 +509,11 @@ def main():
         tha = mcfg.get('transformer_hard_alibi') or {}
         if isinstance(tha, dict) and 'num_masked_heads' in tha:
             hard_num_masked_heads = tha['num_masked_heads']
+        thar = mcfg.get('transformer_hard_alibi_rope') or {}
+        if isinstance(thar, dict) and 'num_masked_heads' in thar:
+            hard_rope_num_masked_heads = thar['num_masked_heads']
+        else:
+            hard_rope_num_masked_heads = hard_num_masked_heads
         pm = mcfg.get('paper_mamba') or {}
         # Use paper_mamba state_dim if available
         if isinstance(pm, dict) and 'state_dim' in pm:
@@ -607,7 +649,7 @@ def main():
                 configs[name] = base_config
 
             # Apply all overrides
-            for key in ('model', 'hidden_size', 'layers', 'heads', 'state_dim', 'dt_min', 'dt_max', 'expand', 'd_conv', 'num_masked_heads', 'dropout_rate'):
+            for key in ('model', 'hidden_size', 'layers', 'heads', 'state_dim', 'dt_min', 'dt_max', 'expand', 'd_conv', 'num_masked_heads', 'dropout_rate', 'rotary_pct', 'rotary_emb_base'):
                 if key in overrides:
                     configs[name][key] = overrides[key]
     # Optional filtering to run specific models
@@ -630,7 +672,7 @@ def main():
         max_eval_len=args_temp.max_eval_len,
     )
     tokenizer, TO_TOKEN, TO_CHAR = get_tokenizer(args_temp)
-    fixed_eval_dataset = generate_fixed_eval_dataset(args_temp, tokenizer, TO_TOKEN, num_examples=100)
+    fixed_eval_dataset = generate_fixed_eval_dataset(args_temp, tokenizer, TO_TOKEN, num_examples=1000)
 
     print("Starting experiments...")
     print("=" * 60)
@@ -662,6 +704,10 @@ def main():
             args.d_conv = config['d_conv']
         if 'dropout_rate' in config:
             args.dropout_rate = config['dropout_rate']
+        if 'rotary_pct' in config:
+            args.rotary_pct = config['rotary_pct']
+        if 'rotary_emb_base' in config:
+            args.rotary_emb_base = config['rotary_emb_base']
 
         # Check if model was already trained to completion
         existing_results = check_existing_results(model_name, args, checkpoints_dir)
@@ -744,12 +790,13 @@ def main():
 
         # Evaluate all checkpoints to reconstruct training-time accuracy curve
         print("Evaluating checkpoints from training...")
-        checkpoint_accuracies, checkpoint_accuracy_examples = evaluate_checkpoints_during_training(
+        checkpoint_mean_accuracies, checkpoint_std_accuracies, checkpoint_accuracy_examples = evaluate_checkpoints_during_training(
             model_name, args, checkpoints_dir, tokenizer, TO_TOKEN, fixed_eval_dataset, device
         )
 
-        # Add checkpoint accuracies to training results
-        training_results['accuracies'] = checkpoint_accuracies
+        # Add checkpoint accuracies to training results (mean ± std)
+        training_results['accuracies'] = checkpoint_mean_accuracies
+        training_results['accuracy_std'] = checkpoint_std_accuracies
         training_results['accuracy_training_examples'] = checkpoint_accuracy_examples
 
         # Recreate model and load saved weights for evaluation (parity with post-run evals)
@@ -800,6 +847,7 @@ def main():
                     'training_examples': results_obj['training']['training_examples'],
                     'training_time': results_obj['training']['training_time'],
                     'accuracies': results_obj['training']['accuracies'],
+                    'accuracy_std': results_obj['training'].get('accuracy_std', []),
                     'accuracy_training_examples': results_obj['training']['accuracy_training_examples'],
                 },
                 'fixed_accuracy': results_obj['fixed_accuracy'],
@@ -844,6 +892,7 @@ def main():
                         'training_examples': r['training']['training_examples'],
                         'training_time': r['training']['training_time'],
                         'accuracies': r['training']['accuracies'],
+                        'accuracy_std': r['training'].get('accuracy_std', []),
                         'accuracy_training_examples': r['training']['accuracy_training_examples'],
                     },
                     'fixed_accuracy': r['fixed_accuracy'],

@@ -1,5 +1,6 @@
 from transformers import GPTNeoXForCausalLM, GPTNeoXConfig
 from .hard_alibi_model import GPTNeoXHardAlibiForCausalLM
+from .hard_alibi_rope_model import GPTNeoXHardAlibiRopeForCausalLM
 from .alibi_model import GPTNeoXAlibiForCausalLM
 from .nope import GPTNeoXNoPEForCausalLM
 from .paper_mamba import PaperMambaLMHeadModel
@@ -38,6 +39,19 @@ def get_model(args, tokenizer):
             rotary_pct=0.0,
             vocab_size=len(tokenizer),
         )
+    elif args.model in ["T_hard_alibi_rope", "transformer_hard_alibi_rope"]:
+        config = GPTNeoXConfig(
+            bos_token_id=0,
+            eos_token_id=0,
+            hidden_size=args.hidden_size,
+            intermediate_size=args.hidden_size * 4,
+            num_attention_heads=args.heads,
+            num_hidden_layers=args.layers,
+            num_masked_heads=getattr(args, "num_masked_heads", 4),
+            rotary_pct=getattr(args, "rotary_pct", 1.0),
+            rotary_emb_base=getattr(args, "rotary_emb_base", 10000),
+            vocab_size=len(tokenizer),
+        )
 
     if args.model == "T_rope":
         model = GPTNeoXForCausalLM(config)
@@ -47,6 +61,8 @@ def get_model(args, tokenizer):
         model = GPTNeoXAlibiForCausalLM(config)
     elif args.model == "T_hard_alibi":
         model = GPTNeoXHardAlibiForCausalLM(config)
+    elif args.model in ["T_hard_alibi_rope", "transformer_hard_alibi_rope"]:
+        model = GPTNeoXHardAlibiRopeForCausalLM(config)
 
     elif args.model == "paper_mamba":
         model = PaperMambaLMHeadModel(
