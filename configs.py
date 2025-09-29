@@ -19,15 +19,15 @@ MAX_EVAL_LEN = 41
 
 # Ensure context is strictly greater than 2x the max length, plus cushion
 CONTEXT_LEN = 2 * MAX_TRAIN_LEN + 20      # > 2 * MAX_TRAIN_LEN
-EVAL_CONTEXT_LEN = 2 * MAX_EVAL_LEN + 50  # > 2 * MAX_EVAL_LEN
+EVAL_CONTEXT_LEN = 2 * MAX_EVAL_LEN + 20  # > 2 * MAX_EVAL_LEN
 
 CONFIG = {
     "global": {
-        "target_params": 350_000,
+        "target_params": 500_000,
         "steps": 30_000,
-        "max_lr": 3e-3,
-        "min_lr": 3e-5,
-        "warmup_steps": 300,
+        "max_lr": 1e-4,
+        "min_lr": 2e-7,
+        "warmup_steps": 500,
         "train_batch_size": 32,
         "eval_batch_size": 4,
         "eval_num_batches": 3,
@@ -46,7 +46,7 @@ CONFIG = {
         "transformer_nope": {"heads": 4},
         "transformer_alibi": {"heads": 4},
         "transformer_hard_alibi": {"heads": 4, "num_masked_heads": 2},
-        "paper_mamba": {"layers": 6, "state_dim": 12},
+        # "paper_mamba": {"layers": 6, "state_dim": 12},  # Disabled
         "minimal_mamba": {"layers": 5, "state_dim": 64, "expand": 2, "d_conv": 4},
     },
 }
