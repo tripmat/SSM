@@ -57,6 +57,8 @@ def train_model(args, model, train_dataset, TO_TOKEN, tokenizer, device=None, ch
     training_examples = []
     accuracies = []
     accuracy_training_examples = []
+    lr_schedule = []
+    lr_training_examples = []
 
     print("Pre-generating training data for consistent learning...")
     training_batches = []
@@ -66,8 +68,7 @@ def train_model(args, model, train_dataset, TO_TOKEN, tokenizer, device=None, ch
 
     # Cleaner progress bar (no ASCII #### bar in logs)
     bar_format = (
-        "{desc}: {n_fmt}/{total_fmt} | {rate_fmt} | "
-        "{postfix} | Elapsed={elapsed} | ETA={remaining}"
+        "{desc} | Elapsed={elapsed} | ETA={remaining}"
     )
     # Friendly label for the training progress bar
     pretty_name = None
@@ -107,6 +108,11 @@ def train_model(args, model, train_dataset, TO_TOKEN, tokenizer, device=None, ch
         file=tqdm_stream,
         disable=not is_tty,
     )
+
+    # Initialize description to avoid comma formatting issues
+    if is_tty:
+        current_lr = optimizer.param_groups[0]['lr']
+        progress_bar.set_description_str(f"Training {pretty_name}: 0/{num_training_steps} | 0.00it/s | LR={current_lr:.2e} | Loss=0.0000 | Examples=0", refresh=False)
     start_time = time.time()
 
     pad_id = TO_TOKEN['*']
@@ -179,6 +185,11 @@ def train_model(args, model, train_dataset, TO_TOKEN, tokenizer, device=None, ch
         losses.append(loss.item())
         training_examples.append(step * args.train_batch_size)
 
+        # Track learning rate schedule
+        current_lr = optimizer.param_groups[0]['lr']
+        lr_schedule.append(current_lr)
+        lr_training_examples.append(step * args.train_batch_size)
+
         if checkpoint_dir and model_name and (step + 1) % 100 == 0:
             print(f"\nSaving checkpoint at step {step + 1}...")
             os.makedirs(checkpoint_dir, exist_ok=True)
@@ -204,8 +215,10 @@ def train_model(args, model, train_dataset, TO_TOKEN, tokenizer, device=None, ch
             torch.save(checkpoint, checkpoint_path)
 
         if is_tty:
-            progress_bar.set_postfix_str(
-                f"Loss={loss.item():.4f} | Examples={step * args.train_batch_size}", refresh=False
+            current_lr = optimizer.param_groups[0]['lr']
+            rate = progress_bar.format_dict.get('rate', 0) or 0
+            progress_bar.set_description_str(
+                f"Training {pretty_name}: {step+1}/{num_training_steps} | {rate:.2f}it/s | LR={current_lr:.2e} | Loss={loss.item():.4f} | Examples={step * args.train_batch_size}", refresh=False
             )
 
     elapsed_time = time.time() - start_time
@@ -217,6 +230,8 @@ def train_model(args, model, train_dataset, TO_TOKEN, tokenizer, device=None, ch
         'training_time': elapsed_time,
         'accuracies': accuracies,
         'accuracy_training_examples': accuracy_training_examples,
+        'lr_schedule': lr_schedule,
+        'lr_training_examples': lr_training_examples,
     }
 
 

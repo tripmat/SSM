@@ -448,6 +448,16 @@ def plot_all_models_comparison(results_dict, save_path="all_models_comparison.pn
                 label = MODEL_LABELS.get(model_name, model_name)
                 ax2.plot(examples, accuracies, color=color, linewidth=2,
                         marker='o', markersize=4, label=label, alpha=0.8)
+                # Optional uncertainty band if stds are available
+                stds = results['training'].get('accuracy_std', [])
+                print(f"Debug {model_name}: Found {len(stds)} std values for {len(accuracies)} accuracies")
+                if stds and len(stds) == len(accuracies):
+                    print(f"Debug {model_name}: Adding error bars with std range {min(stds):.2f}-{max(stds):.2f}")
+                    a = np.array(accuracies)
+                    s = np.array(stds)
+                    lower = np.clip(a - s, 0, 100)
+                    upper = np.clip(a + s, 0, 100)
+                    ax2.fill_between(examples, lower, upper, color=color, alpha=0.15, linewidth=0)
 
     ax2.set_xlabel('Training Examples')
     ax2.set_ylabel('Accuracy (%)')
@@ -533,15 +543,15 @@ def plot_single_model_analysis(model_name, results, checkpoints_dir, args, token
     ax2 = plt.subplot(3, 3, 2)
     ax3 = plt.subplot(3, 3, 3)
 
-    # Middle row: Length generalization at 30%, 40%, 50% training
-    ax4 = plt.subplot(3, 3, 4)
-    ax5 = plt.subplot(3, 3, 5)
-    ax6 = plt.subplot(3, 3, 6)
+    # Middle row: Learning rate curve, 40%, 50% training
+    ax4 = plt.subplot(3, 3, 4)  # Learning rate curve
+    ax5 = plt.subplot(3, 3, 5)  # 40% training
+    ax6 = plt.subplot(3, 3, 6)  # 50% training
 
-    # Bottom row: Length generalization at 60%, 70%, 80% training
-    ax7 = plt.subplot(3, 3, 7)
-    ax8 = plt.subplot(3, 3, 8)
-    ax9 = plt.subplot(3, 3, 9)
+    # Bottom row: Length generalization at 60%, 70% training, and final length gen
+    ax7 = plt.subplot(3, 3, 7)  # 60% training
+    ax8 = plt.subplot(3, 3, 8)  # 70% training
+    ax9 = plt.subplot(3, 3, 9)  # Final length generalization (moved here)
 
     # Panel 1: Training Loss Curve
     if 'training' in results and 'losses' in results['training']:
@@ -570,38 +580,43 @@ def plot_single_model_analysis(model_name, results, checkpoints_dir, args, token
         acc_examples = results['training']['accuracy_training_examples']
         if accuracies and acc_examples:
             ax2.plot(acc_examples, accuracies, color=color, linewidth=2, marker='o', markersize=3)
+            stds = results['training'].get('accuracy_std', [])
+            print(f"Debug single model: Found {len(stds)} std values for {len(accuracies)} accuracies")
+            if stds and len(stds) == len(accuracies):
+                print(f"Debug single model: Adding error bars with std range {min(stds):.2f}-{max(stds):.2f}")
+                a = np.array(accuracies)
+                s = np.array(stds)
+                lower = np.clip(a - s, 0, 100)
+                upper = np.clip(a + s, 0, 100)
+                ax2.fill_between(acc_examples, lower, upper, color=color, alpha=0.15, linewidth=0)
             ax2.set_xlabel('Training Examples')
             ax2.set_ylabel('Accuracy (%)')
             ax2.set_title('Training Accuracy Progress')
             ax2.set_ylim(0, 100)
             ax2.grid(True, alpha=0.3)
 
-    # Panel 3: Final Length Generalization
-    max_train_len = None
-    if 'length_gen' in results and results['length_gen']:
-        lengths = [r['length'] for r in results['length_gen']]
-        accuracies = [r['accuracy'] for r in results['length_gen']]
-        ax3.plot(lengths, accuracies, color=color, linewidth=2, marker='s', markersize=3)
+    # Panel 3: Learning Rate Schedule
+    if 'training' in results and 'lr_schedule' in results['training']:
+        lr_schedule = results['training']['lr_schedule']
+        lr_examples = results['training']['lr_training_examples']
+        ax3.plot(lr_examples, lr_schedule, color=color, linewidth=2)
+        ax3.set_xlabel('Training Examples')
+        ax3.set_ylabel('Learning Rate')
+        ax3.set_title('Learning Rate Schedule')
+        ax3.set_yscale('log')
+        ax3.grid(True, alpha=0.3)
+    else:
+        ax3.text(0.5, 0.5, 'Learning Rate\nData Not Available', ha='center', va='center', transform=ax3.transAxes)
+        ax3.set_title('Learning Rate Schedule')
+        ax3.grid(True, alpha=0.3)
 
-        # Get max_train_len from config
-        if 'config' in results:
-            max_train_len = results['config'].get('max_train_len', 50)
-            ax3.axvline(x=max_train_len, color='red', linestyle='--', alpha=0.7, linewidth=2,
-                       label=f'Max train length ({max_train_len})')
-
-    ax3.set_xlabel('Sequence Length')
-    ax3.set_ylabel('Accuracy (%)')
-    ax3.set_title('Final Length Generalization')
-    ax3.set_ylim(0, 100)
-    ax3.grid(True, alpha=0.3)
-    if max_train_len is not None:
-        ax3.legend()
+    # Panel 4 will be 50% checkpoint (handled below in the loop)
 
     # Middle and Bottom panels: Checkpoint-based length generalization
     total_steps = args.steps
     total_examples = total_steps * args.train_batch_size  # Convert steps to training examples
-    checkpoint_percentages = [30, 40, 50, 60, 70, 80]  # 30%, 40%, 50%, 60%, 70%, 80% of training
-    checkpoint_axes = [ax4, ax5, ax6, ax7, ax8, ax9]
+    checkpoint_percentages = [50, 60, 70, 80, 90]  # 50%, 60%, 70%, 80%, 90%
+    checkpoint_axes = [ax4, ax5, ax6, ax7, ax8]  # ax4-ax8 for checkpoints, ax9 for final length gen
 
     from ..evaluate import evaluate_length_generalization
     from ..models.registry import get_model
@@ -680,6 +695,27 @@ def plot_single_model_analysis(model_name, results, checkpoints_dir, args, token
         ax.set_ylabel('Accuracy (%)')
         ax.set_ylim(0, 100)
         ax.grid(True, alpha=0.3)
+
+    # Panel 9 (ax9): Final Length Generalization (moved from ax3)
+    max_train_len = None
+    if 'length_gen' in results and results['length_gen']:
+        lengths = [r['length'] for r in results['length_gen']]
+        accuracies = [r['accuracy'] for r in results['length_gen']]
+        ax9.plot(lengths, accuracies, color=color, linewidth=2, marker='s', markersize=3)
+
+        # Get max_train_len from config
+        if 'config' in results:
+            max_train_len = results['config'].get('max_train_len', 50)
+            ax9.axvline(x=max_train_len, color='red', linestyle='--', alpha=0.7, linewidth=2,
+                       label=f'Max train length ({max_train_len})')
+
+    ax9.set_xlabel('Sequence Length')
+    ax9.set_ylabel('Accuracy (%)')
+    ax9.set_title('Final Length Generalization')
+    ax9.set_ylim(0, 100)
+    ax9.grid(True, alpha=0.3)
+    if max_train_len is not None:
+        ax9.legend()
 
     plt.suptitle(f'{label} - Detailed Analysis with Overfitting Progression', fontsize=16, y=0.96)
     plt.tight_layout()
