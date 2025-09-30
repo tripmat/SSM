@@ -251,10 +251,10 @@ def get_training_config_info(args):
         # Optimizer configuration (defaults for this framework)
         'optimizer': 'Adam',  # Default for this framework
         'optimizer_betas': [0.9, 0.999],  # Adam defaults
-        'weight_decay': getattr(args, 'weight_decay', 0.0),
+        'weight_decay': getattr(args, 'weight_decay', 0.01),
         'optimizer_eps': 1e-8,
         'scheduler_type': 'cosine_with_warmup',  # Based on CLI implementation
-        'gradient_clip_val': getattr(args, 'gradient_clip_val', None),
+        'gradient_clip_val': getattr(args, 'gradient_clip_val', 1.0),
         'gradient_accumulation_steps': 1,  # Default
         'mixed_precision': 'none',  # Default for this framework
 

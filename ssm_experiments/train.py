@@ -30,7 +30,8 @@ def train_model(args, model, train_dataset, TO_TOKEN, tokenizer, device=None, ch
     max_lr = float(getattr(args, 'max_lr', getattr(args, 'lr', 1e-4)))
     min_lr = float(getattr(args, 'min_lr', 1e-6))
     warmup_steps = int(getattr(args, 'warmup_steps', 300))
-    optimizer = AdamW(model.parameters(), lr=max_lr, weight_decay=0.1)
+    weight_decay = float(getattr(args, 'weight_decay', 0.01))
+    optimizer = AdamW(model.parameters(), lr=max_lr, weight_decay=weight_decay)
 
     # Cosine schedule with warmup: 0 -> max_lr (warmup) -> min_lr (cosine decay)
     total_steps = int(args.steps)
@@ -174,7 +175,8 @@ def train_model(args, model, train_dataset, TO_TOKEN, tokenizer, device=None, ch
             loss = torch.tensor(3.0, device=shift_logits.device, requires_grad=True)
 
         loss.backward()
-        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        gradient_clip_val = float(getattr(args, 'gradient_clip_val', 1.0))
+        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip_val)
         if torch.isnan(grad_norm) or torch.isinf(grad_norm):
             print(f"Warning: grad_norm is {grad_norm} at step {step}")
             optimizer.zero_grad()

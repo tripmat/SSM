@@ -28,3 +28,6 @@ outputs/
 # Windows reserved device filename accidentally created; ignore to avoid add/index errors
 nul
 
+# Local files folder (not synchronized with git)
+locals/
+

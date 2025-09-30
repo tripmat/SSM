@@ -1,53 +1,81 @@
 import numpy as np
+import math
 import torch
 from types import SimpleNamespace
 
 from .data.datasets import get_eval_dataset
 
 
-def offline_accuracy_evaluation(model, fixed_eval_dataset, args, tokenizer, TO_TOKEN, device=None):
+def offline_accuracy_evaluation(model, fixed_eval_dataset, args, tokenizer, TO_TOKEN, device=None, batch_size=None, log_interval: int = 0):
+    """Evaluate exact-match accuracy on a fixed set, batched.
+
+    - Masks the answer region in the inputs to avoid leakage.
+    - Runs inference in batches for speed and stability.
+    - Returns percentage accuracy (0–100).
+    """
     # Auto-detect device if not specified
     if device is None:
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    print(f"Running offline accuracy evaluation on {len(fixed_eval_dataset)} examples (masked answer region)...")
+
+    # Determine batch size
+    if batch_size is None:
+        batch_size = getattr(args, 'eval_batch_size', 4)
+
+    num_examples = len(fixed_eval_dataset)
+    if log_interval:
+        print(f"Running offline accuracy evaluation on {num_examples} examples (batched, masked answer region)...")
+
     model.eval()
     model = model.to(device)  # Ensure model is on correct device
     pad_id = TO_TOKEN['*']
+
+    # Stack all examples into tensors for efficient slicing
     with torch.inference_mode():
-        all_string_accuracies = []
-        for eval_example in fixed_eval_dataset:
-            # Original (unmasked) inputs used for computing ground-truth span
-            eval_x = eval_example['input_ids'].to(device)
-            eval_mask_full = eval_example['mask'].to(device)
+        all_inputs = torch.cat([ex['input_ids'] for ex in fixed_eval_dataset], dim=0)
+        all_masks = torch.cat([ex['mask'] for ex in fixed_eval_dataset], dim=0)
 
-            # Mask the answer region to avoid teacher-forcing leakage
-            eval_x_masked = eval_x.clone()
-            # Mask only positions that are themselves in the answer region (avoid masking '|')
-            eval_mask_x = eval_mask_full[:, :-1]
-            eval_x_masked[:, :-1][eval_mask_x == 1] = pad_id
+        total_correct = 0
+        # Iterate in batches
+        total_batches = math.ceil(num_examples / batch_size)
+        for bidx, start in enumerate(range(0, num_examples, batch_size), start=1):
+            end = min(start + batch_size, num_examples)
+            x_full = all_inputs[start:end].to(device)
+            mask_full = all_masks[start:end].to(device)
 
-            # Forward pass on masked inputs
-            # Support transformers-style dict outputs and tuple/list outputs
+            # Create masked input to avoid leakage (mask the answer tokens themselves)
+            x_masked = x_full.clone()
+            mask_x = mask_full[:, :-1]
+            x_masked[:, :-1][mask_x == 1] = pad_id
+
+            # Forward pass (handle dict/tuple outputs)
             try:
-                out = model(eval_x_masked, use_cache=False)
+                out = model(x_masked, use_cache=False)
             except Exception:
-                out = model(eval_x_masked)
+                out = model(x_masked)
             if isinstance(out, dict):
-                eval_logits = out.get('logits', out)
+                logits = out.get('logits', out)
             elif isinstance(out, (list, tuple)):
-                eval_logits = out[0]
+                logits = out[0]
             else:
-                eval_logits = out
+                logits = out
 
-            # Predictions for the answer region
-            eval_pred = torch.argmax(eval_logits, dim=-1)
+            pred = torch.argmax(logits, dim=-1)
 
-            # Compute accuracy against the original unmasked input
-            str_acc, _ = get_score(args, tokenizer, eval_x, eval_pred, 0)
-            all_string_accuracies.append(str_acc)
+            # Compute per-sample exact match within the batch
+            batch_correct = 0
+            for i in range(len(x_full)):
+                str_acc, _ = get_score(args, tokenizer, x_full, pred, i)
+                batch_correct += int(str_acc)
+            total_correct += batch_correct
 
-        avg_accuracy = sum(all_string_accuracies) / len(all_string_accuracies) * 100
-        print(f"Fixed dataset accuracy: {avg_accuracy:.1f}% ({len(all_string_accuracies)} examples)")
+            if log_interval and (bidx % log_interval == 0 or bidx == total_batches):
+                processed = end
+                running_acc = (total_correct / processed) * 100.0
+                print(f"  eval batch {bidx}/{total_batches} | processed={processed}/{num_examples} | running_acc={running_acc:.2f}%")
+
+        avg_accuracy = (total_correct / num_examples) * 100.0
+        if log_interval:
+            print(f"Fixed dataset accuracy: {avg_accuracy:.1f}% ({num_examples} examples)")
         return avg_accuracy
 
 
@@ -117,8 +145,9 @@ def evaluate_length_generalization(args, model, tokenizer, TO_TOKEN, device=None
     return results
 
 
-def generate_fixed_eval_dataset(args, tokenizer, TO_TOKEN, num_examples=100):
-    print(f"Generating fixed evaluation dataset with {num_examples} examples of length {args.max_train_len}...")
+def generate_fixed_eval_dataset(args, tokenizer, TO_TOKEN, num_examples=1000, verbose: bool = True):
+    if verbose:
+        print(f"Generating fixed evaluation dataset with {num_examples} examples of length {args.max_train_len}...")
     eval_dataset = get_eval_dataset(
         args, tokenizer, TO_TOKEN,
         target_min_len=args.max_train_len,
@@ -137,7 +166,8 @@ def generate_fixed_eval_dataset(args, tokenizer, TO_TOKEN, num_examples=100):
                     'mask': batch['mask'][i:i+1],
                     'input': [batch['input'][i]],
                 })
-    print(f"Generated {len(fixed_eval_examples)} evaluation examples")
+    if verbose:
+        print(f"Generated {len(fixed_eval_examples)} evaluation examples")
     return fixed_eval_examples
 
 

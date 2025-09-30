@@ -24,11 +24,13 @@ EVAL_CONTEXT_LEN = 2 * MAX_EVAL_LEN + 20  # > 2 * MAX_EVAL_LEN
 CONFIG = {
     "global": {
         "target_params": 500_000,
-        "steps": 200,
-        "max_lr": 1e-4,
-        "min_lr": 2e-7,
+        "steps": 50_000,
+        "max_lr": 2e-4,
+        "min_lr": 1e-7,
         "warmup_steps": 500,
-        "train_batch_size": 32,
+        "weight_decay": 0.01,
+        "gradient_clip_val": 1.0,
+        "train_batch_size": 64,
         "eval_batch_size": 4,
         "eval_num_batches": 3,
         "min_train_len": MIN_TRAIN_LEN ,
