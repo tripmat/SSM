@@ -340,7 +340,7 @@ def main():
 
     def check_existing_results(model_name, args, checkpoints_dir):
         """Check if a model has already been trained to completion"""
-        config_str = f"{model_name}_{args.hidden_size}h_{args.layers}l_{args.lr}lr_{args.steps}s"
+        config_str = f"{model_name}_{args.hidden_size}h_{args.layers}l_{args.steps}s"
         results_path = os.path.join(checkpoints_dir, f"{config_str}_results.json")
 
         if os.path.exists(results_path):
@@ -778,7 +778,7 @@ def main():
         )
 
         # Save final model checkpoint BEFORE evaluation, then reload for eval to ensure parity
-        config_str = f"{model_name}_{args.hidden_size}h_{args.layers}l_{args.lr}lr_{args.steps}s"
+        config_str = f"{model_name}_{args.hidden_size}h_{args.layers}l_{args.steps}s"
         checkpoint_path = os.path.join(checkpoints_dir, f"{config_str}.pth")
         results_path = os.path.join(checkpoints_dir, f"{config_str}_results.json")
 

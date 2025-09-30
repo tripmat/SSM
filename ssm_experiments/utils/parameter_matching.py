@@ -368,21 +368,15 @@ def get_optimal_configs(
             'heads': base_heads,
             'actual_params': verification['transformer']['actual_params'],
         },
-        'transformer_hard_alibi': {
-            'model': 'T_hard_alibi',
+        'transformer_hard_alibi_rope': {
+            'model': 'transformer_hard_alibi_rope',
             'hidden_size': base_hidden_size,
             'layers': base_layers,
             'heads': base_heads,
             'num_masked_heads': hard_num_masked_heads,
+            'rotary_pct': 1.0,
+            'rotary_emb_base': 10000,
             'actual_params': verification['transformer']['actual_params'],
-        },
-        'paper_mamba': {
-            'model': 'paper_mamba',
-            'hidden_size': matched['paper_mamba']['hidden_size'],
-            'layers': matched['paper_mamba']['layers'],
-            'heads': max(4, matched['paper_mamba']['hidden_size'] // 64),
-            'state_dim': matched['paper_mamba']['state_dim'],
-            'actual_params': verification['paper_mamba']['actual_params'],
         },
     }
     return final

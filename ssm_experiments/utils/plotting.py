@@ -84,9 +84,8 @@ def plot_paper_reproduction(transformer_results, mamba_results, save_path="paper
     ax2.grid(True, alpha=0.3)
     ax2.set_ylim(0, 105)
 
-    train_max = 50
-    ax2.axvline(x=train_max, color='gray', alpha=0.5, linestyle='--',
-                label=f'Max train length ({train_max})')
+    # Add shaded training length region (5-20)
+    ax2.axvspan(5, 20, color='red', alpha=0.2, label='Training length range (5-20)', zorder=0)
 
     for ax in [ax1, ax2]:
         ax.spines['top'].set_visible(False)
@@ -483,10 +482,16 @@ def plot_all_models_comparison(results_dict, save_path="all_models_comparison.pn
         if max_train_len is None and 'config' in results:
             max_train_len = results['config'].get('max_train_len', 50)  # fallback to 50
 
-    # Add vertical line showing max training length
+    # Add shaded training length region
     if max_train_len is not None:
-        ax3.axvline(x=max_train_len, color='red', linestyle='--', alpha=0.7, linewidth=2,
-                   label=f'Max train length ({max_train_len})')
+        # Get min_train_len from config (fallback to 5)
+        min_train_len = 5  # Will be extracted from config if available
+        for model_name, results in valid_results.items():
+            if 'config' in results and min_train_len == 5:  # Only set once
+                min_train_len = results['config'].get('min_train_len', 5)
+                break
+        ax3.axvspan(min_train_len, max_train_len, color='red', alpha=0.2,
+                   label=f'Training length range ({min_train_len}-{max_train_len})', zorder=0)
 
     ax3.set_xlabel('Sequence Length')
     ax3.set_ylabel('Accuracy (%)')
@@ -681,9 +686,12 @@ def plot_single_model_analysis(model_name, results, checkpoints_dir, args, token
                     accuracies = [r['accuracy'] for r in length_results]
                     ax.plot(lengths, accuracies, color=color, linewidth=2, marker='s', markersize=3)
 
-                    # Add training length line
-                    if max_train_len is not None:
-                        ax.axvline(x=max_train_len, color='red', linestyle='--', alpha=0.5, linewidth=1)
+                    # Add training length shaded region
+                    config = results.get('config', {})
+                    max_train_len_local = config.get('max_train_len')
+                    if max_train_len_local is not None:
+                        min_train_len = config.get('min_train_len', 5)
+                        ax.axvspan(min_train_len, max_train_len_local, color='red', alpha=0.2, zorder=0)
 
                 ax.set_title(f'Length Gen. at {percentage}% Training\n(Step {closest_step}, {closest_step * args.train_batch_size} examples)')
 
@@ -705,11 +713,12 @@ def plot_single_model_analysis(model_name, results, checkpoints_dir, args, token
         accuracies = [r['accuracy'] for r in results['length_gen']]
         ax9.plot(lengths, accuracies, color=color, linewidth=2, marker='s', markersize=3)
 
-        # Get max_train_len from config
+        # Get train length bounds from config
         if 'config' in results:
-            max_train_len = results['config'].get('max_train_len', 50)
-            ax9.axvline(x=max_train_len, color='red', linestyle='--', alpha=0.7, linewidth=2,
-                       label=f'Max train length ({max_train_len})')
+            max_train_len = results['config'].get('max_train_len', 20)
+            min_train_len = results['config'].get('min_train_len', 5)
+            ax9.axvspan(min_train_len, max_train_len, color='red', alpha=0.2,
+                       label=f'Training length range ({min_train_len}-{max_train_len})', zorder=0)
 
     ax9.set_xlabel('Sequence Length')
     ax9.set_ylabel('Accuracy (%)')
