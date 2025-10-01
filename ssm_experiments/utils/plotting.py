@@ -6,6 +6,7 @@ import seaborn as sns
 import torch
 import pickle
 import os
+from scipy.ndimage import gaussian_filter1d
 
 plt.style.use('default')
 sns.set_palette("husl")
@@ -30,6 +31,28 @@ MODEL_LABELS = {
     'paper_mamba': 'Paper-Mamba',
     'minimal_mamba': 'Minimal-Mamba',
 }
+
+
+def exponential_moving_average(data, alpha=0.1):
+    """Apply exponential moving average smoothing to data.
+
+    Args:
+        data: List or array of values
+        alpha: Smoothing factor (0 < alpha < 1). Lower values = more smoothing
+
+    Returns:
+        Smoothed data as numpy array
+    """
+    if len(data) == 0:
+        return np.array([])
+
+    smoothed = np.zeros_like(data, dtype=float)
+    smoothed[0] = data[0]
+
+    for i in range(1, len(data)):
+        smoothed[i] = alpha * data[i] + (1 - alpha) * smoothed[i-1]
+
+    return smoothed
 
 
 def plot_paper_reproduction(transformer_results, mamba_results, save_path="paper_reproduction.png"):
@@ -205,11 +228,21 @@ def plot_comprehensive_summary(transformer_results, mamba_results, save_path="co
     if transformer_results is not None:
         t_ex = transformer_results['training'].get('training_examples', [])
         t_ls = transformer_results['training'].get('losses', [])
-        ax1.plot(t_ex, t_ls, color=transformer_color, linewidth=2, label='Transformer')
+        if len(t_ls) > 0:
+            # Plot raw data with transparency
+            ax1.plot(t_ex, t_ls, color=transformer_color, alpha=0.3, linewidth=1)
+            # Plot smoothed data
+            t_ls_smooth = exponential_moving_average(t_ls, alpha=0.1)
+            ax1.plot(t_ex, t_ls_smooth, color=transformer_color, linewidth=2, label='Transformer')
     if mamba_results is not None:
         m_ex = mamba_results['training'].get('training_examples', [])
         m_ls = mamba_results['training'].get('losses', [])
-        ax1.plot(m_ex, m_ls, color=mamba_color, linewidth=2, label='Mamba')
+        if len(m_ls) > 0:
+            # Plot raw data with transparency
+            ax1.plot(m_ex, m_ls, color=mamba_color, alpha=0.3, linewidth=1)
+            # Plot smoothed data
+            m_ls_smooth = exponential_moving_average(m_ls, alpha=0.1)
+            ax1.plot(m_ex, m_ls_smooth, color=mamba_color, linewidth=2, label='Mamba')
     ax1.set_title('Training Loss')
     ax1.set_xlabel('Training Examples')
     ax1.set_ylabel('Loss')
@@ -352,8 +385,20 @@ def plot_comparison(transformer_results, mamba_results, save_path="comparison_ov
     t_ls = transformer_results['training'].get('losses', [])
     m_ex = mamba_results['training'].get('training_examples', [])
     m_ls = mamba_results['training'].get('losses', [])
-    ax_loss.plot(t_ex, t_ls, color=transformer_color, linewidth=2, label='Transformer')
-    ax_loss.plot(m_ex, m_ls, color=mamba_color, linewidth=2, label='Mamba')
+
+    if len(t_ls) > 0:
+        # Plot raw transformer data with transparency
+        ax_loss.plot(t_ex, t_ls, color=transformer_color, alpha=0.3, linewidth=1)
+        # Plot smoothed transformer data
+        t_ls_smooth = exponential_moving_average(t_ls, alpha=0.1)
+        ax_loss.plot(t_ex, t_ls_smooth, color=transformer_color, linewidth=2, label='Transformer')
+
+    if len(m_ls) > 0:
+        # Plot raw mamba data with transparency
+        ax_loss.plot(m_ex, m_ls, color=mamba_color, alpha=0.3, linewidth=1)
+        # Plot smoothed mamba data
+        m_ls_smooth = exponential_moving_average(m_ls, alpha=0.1)
+        ax_loss.plot(m_ex, m_ls_smooth, color=mamba_color, linewidth=2, label='Mamba')
     ax_loss.set_title('Training Loss')
     ax_loss.set_xlabel('Training Examples')
     ax_loss.set_ylabel('Loss')
@@ -429,7 +474,13 @@ def plot_all_models_comparison(results_dict, save_path="all_models_comparison.pn
             examples = results['training']['training_examples']
             color = MODEL_COLORS.get(model_name, 'gray')
             label = MODEL_LABELS.get(model_name, model_name)
-            ax1.plot(examples, losses, color=color, linewidth=2, label=label, alpha=0.8)
+
+            if len(losses) > 0:
+                # Plot raw data with transparency
+                ax1.plot(examples, losses, color=color, alpha=0.3, linewidth=1)
+                # Plot smoothed data
+                losses_smooth = exponential_moving_average(losses, alpha=0.1)
+                ax1.plot(examples, losses_smooth, color=color, linewidth=2, label=label)
 
     ax1.set_xlabel('Training Examples')
     ax1.set_ylabel('Loss')
@@ -447,13 +498,24 @@ def plot_all_models_comparison(results_dict, save_path="all_models_comparison.pn
             if accuracies and examples:
                 color = MODEL_COLORS.get(model_name, 'gray')
                 label = MODEL_LABELS.get(model_name, model_name)
-                ax2.plot(examples, accuracies, color=color, linewidth=2,
-                        marker='o', markersize=4, label=label, alpha=0.8)
+
+                # Plot raw data with markers
+                ax2.plot(examples, accuracies, color=color, linewidth=1,
+                        marker='o', markersize=4, alpha=0.4, linestyle='-')
+
+                # Add smoothed line if we have enough data points (>= 10)
+                if len(accuracies) >= 10:
+                    accuracies_smooth = gaussian_filter1d(accuracies, sigma=10, mode='nearest')
+                    ax2.plot(examples, accuracies_smooth, color=color, linewidth=2.5, label=label)
+                else:
+                    # For few points, just show the raw data with label
+                    ax2.lines[-1].set_label(label)
+                    ax2.lines[-1].set_alpha(0.8)
+                    ax2.lines[-1].set_linewidth(2)
+
                 # Optional uncertainty band if stds are available
                 stds = results['training'].get('accuracy_std', [])
-                print(f"Debug {model_name}: Found {len(stds)} std values for {len(accuracies)} accuracies")
                 if stds and len(stds) == len(accuracies):
-                    print(f"Debug {model_name}: Adding error bars with std range {min(stds):.2f}-{max(stds):.2f}")
                     a = np.array(accuracies)
                     s = np.array(stds)
                     lower = np.clip(a - s, 0, 100)
@@ -539,32 +601,41 @@ def plot_single_model_analysis(model_name, results, checkpoints_dir, args, token
     """Create detailed single model analysis with checkpoint-based length generalization"""
     import glob
 
-    fig = plt.subplots(3, 3, figsize=(18, 16))[0]
+    # Clear any previous plots to avoid overlay artifacts
+    plt.close('all')
+
+    fig, axes = plt.subplots(3, 3, figsize=(18, 16))
 
     # Get model color and label
     color = MODEL_COLORS.get(model_name, 'gray')
     label = MODEL_LABELS.get(model_name, model_name)
 
     # Top row: Training analysis
-    ax1 = plt.subplot(3, 3, 1)
-    ax2 = plt.subplot(3, 3, 2)
-    ax3 = plt.subplot(3, 3, 3)
+    ax1 = axes[0, 0]
+    ax2 = axes[0, 1]
+    ax3 = axes[0, 2]
 
     # Middle row: Learning rate curve, 40%, 50% training
-    ax4 = plt.subplot(3, 3, 4)  # Learning rate curve
-    ax5 = plt.subplot(3, 3, 5)  # 40% training
-    ax6 = plt.subplot(3, 3, 6)  # 50% training
+    ax4 = axes[1, 0]  # Learning rate curve
+    ax5 = axes[1, 1]  # 40% training
+    ax6 = axes[1, 2]  # 50% training
 
     # Bottom row: Length generalization at 60%, 70% training, and final length gen
-    ax7 = plt.subplot(3, 3, 7)  # 60% training
-    ax8 = plt.subplot(3, 3, 8)  # 70% training
-    ax9 = plt.subplot(3, 3, 9)  # Final length generalization (moved here)
+    ax7 = axes[2, 0]  # 60% training
+    ax8 = axes[2, 1]  # 70% training
+    ax9 = axes[2, 2]  # Final length generalization (moved here)
 
     # Panel 1: Training Loss Curve
     if 'training' in results and 'losses' in results['training']:
         losses = results['training']['losses']
         examples = results['training']['training_examples']
-        ax1.plot(examples, losses, color=color, linewidth=2)
+
+        if len(losses) > 0:
+            # Plot raw data with transparency
+            ax1.plot(examples, losses, color=color, alpha=0.3, linewidth=1)
+            # Plot smoothed data
+            losses_smooth = exponential_moving_average(losses, alpha=0.1)
+            ax1.plot(examples, losses_smooth, color=color, linewidth=2)
 
         # Add dotted lines at 30%, 40%, 50%, 60%, 70%, 80%, 100% of training
         total_steps = args.steps
@@ -586,11 +657,17 @@ def plot_single_model_analysis(model_name, results, checkpoints_dir, args, token
         accuracies = results['training']['accuracies']
         acc_examples = results['training']['accuracy_training_examples']
         if accuracies and acc_examples:
-            ax2.plot(acc_examples, accuracies, color=color, linewidth=2, marker='o', markersize=3)
+            # Plot raw data with markers
+            ax2.plot(acc_examples, accuracies, color=color, linewidth=1, marker='o',
+                    markersize=5, alpha=0.4, linestyle='-')
+
+            # Add smoothed line if we have enough data points (>= 10)
+            if len(accuracies) >= 10:
+                accuracies_smooth = gaussian_filter1d(accuracies, sigma=10, mode='nearest')
+                ax2.plot(acc_examples, accuracies_smooth, color=color, linewidth=2.5)
+
             stds = results['training'].get('accuracy_std', [])
-            print(f"Debug single model: Found {len(stds)} std values for {len(accuracies)} accuracies")
             if stds and len(stds) == len(accuracies):
-                print(f"Debug single model: Adding error bars with std range {min(stds):.2f}-{max(stds):.2f}")
                 a = np.array(accuracies)
                 s = np.array(stds)
                 lower = np.clip(a - s, 0, 100)
